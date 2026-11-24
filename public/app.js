@@ -491,7 +491,7 @@ const LEVELS = [
 S.mode = store.get('mode', 'ai'); S.level = store.get('level', 'normal');
 async function renderLobby() {
   const L = $('#lobby'); if (!L) return;
-  if (!S.lan) S.lan = (await api('/api/info').catch(() => ({ lan: [] }))).lan;
+  if (!S.lan) S.lan = /^(localhost|127\.|\[::1\])/.test(location.hostname) ? (await api('/api/info').catch(() => ({ lan: [] }))).lan : [];
   L.innerHTML = '';
   // waiting for the second human
   if (S.v && S.v.phase === 'lobby' && S.room) {

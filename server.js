@@ -114,10 +114,14 @@ function newTag() {
   return t;
 }
 function makeRoom(mode) {
-  const r = { tag: newTag(), mode, state: game.newState(), clients: new Set(), ai: null, decks: {}, timer: null };
+  const r = { tag: newTag(), mode, state: game.newState(), clients: new Set(), ai: null, decks: {}, timer: null, seen: Date.now() };
   rooms.set(r.tag, r);
   return r;
 }
+// online: rooms nobody has looked at for 2 hours are dropped (memory)
+setInterval(() => {
+  for (const r of rooms.values()) if (!r.clients.size && Date.now() - r.seen > 2 * 3600e3) { clearTimeout(r.timer); rooms.delete(r.tag); }
+}, 10 * 60e3).unref();
 function broadcast(r) {
   const extra = { room: r.tag, mode: r.mode, ai: r.ai && { seat: r.ai.seat, level: r.ai.level } };
   for (const c of r.clients) c.res.write(`data: ${JSON.stringify({ ...game.viewFor(r.state, c.seat), ...extra })}\n\n`);
@@ -227,10 +231,10 @@ http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       if (!r) { res.write(`data: ${JSON.stringify({ phase: 'none' })}\n\n`); return res.end(); }
       const c = { res, seat };
-      r.clients.add(c);
+      r.clients.add(c); r.seen = Date.now();
       broadcast(r);
       const ping = setInterval(() => res.write(': ping\n\n'), 20000);
-      req.on('close', () => { clearInterval(ping); r.clients.delete(c); });
+      req.on('close', () => { clearInterval(ping); r.clients.delete(c); r.seen = Date.now(); });
       return;
     }
     if (p === '/api/action' && req.method === 'POST') {

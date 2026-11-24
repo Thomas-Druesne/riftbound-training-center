@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "Simulateur local de Riftbound pour s'entrainer (LAN / meme PC).",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
     "test": "node test.js"

@@ -9,6 +9,16 @@ Prérequis : [Node.js](https://nodejs.org) 20 ou plus récent. Aucune dépendanc
 - Windows : double-clic sur `Riftbound Training Center.exe` (ou `Lancer.bat`).
 - Ailleurs : `npm start`, puis ouvrir http://localhost:3000
 
+## En ligne (multijoueur à distance)
+
+Le dépôt contient `render.yaml` : sur [render.com](https://render.com), New › Blueprint › ce dépôt › Apply.
+Chaque `git push` sur `main` redéploie le site. Les deux joueurs ouvrent l'adresse du site ; l'un crée une partie
+(Contre un joueur › Créer), l'autre la rejoint avec le tag.
+
+Limites de l'offre gratuite : le serveur s'endort après un moment sans visite (réveil ~1 min), et les decks créés
+en ligne sont perdus à chaque redéploiement (disque non persistant). Pas de compte ni de mot de passe : qui a le tag
+peut entrer dans la partie.
+
 ## Tests
 
 ```
