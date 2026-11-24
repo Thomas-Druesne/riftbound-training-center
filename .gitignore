@@ -1,0 +1,7 @@
+node_modules/
+*.log
+# Windows folder icon (local only)
+desktop.ini
+Thumbs.db
+# local Claude Code settings
+.claude/settings.local.json

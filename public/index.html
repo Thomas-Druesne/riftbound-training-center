@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Riftbound Training Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="fx"></canvas>
+
+<!-- TITLE -->
+<section id="scr-title" class="screen active">
+  <div class="title-wrap">
+    <div class="sigil"><i></i><i></i><i></i></div>
+    <img class="logo-img" alt="RIFTBOUND" src="https://cmsassets.rgpub.io/sanity/images/dsfx7636/news/23d41c7809a48a013f3d8a7204b81fb4d8bdb164-10000x4389.png?accountingTag=RB&fm=png&w=1400" onerror="this.replaceWith(Object.assign(document.createElement('h1'),{className:'logo',textContent:'RIFTBOUND'}))">
+    <div class="logo-sub">Training Center</div>
+    <div class="press">Appuyez sur une touche</div>
+  </div>
+  <div class="disclaimer">Projet d'entraînement non officiel, local. Riftbound et les visuels appartiennent à Riot Games. Images affichées depuis leurs serveurs, jamais copiées.</div>
+</section>
+
+<!-- MAIN MENU -->
+<section id="scr-menu" class="screen">
+  <div class="menu-wrap">
+    <img class="logo-img small" alt="RIFTBOUND" src="https://cmsassets.rgpub.io/sanity/images/dsfx7636/news/23d41c7809a48a013f3d8a7204b81fb4d8bdb164-10000x4389.png?accountingTag=RB&fm=png&w=900" onerror="this.replaceWith(Object.assign(document.createElement('h2'),{className:'logo small',textContent:'RIFTBOUND'}))">
+    <div class="logo-sub">Training Center</div>
+    <nav class="menu">
+      <button data-go="lobby" class="mbtn"><span>Jouer</span><em>Contre l'IA ou contre un joueur avec un tag</em></button>
+      <button data-go="decks" class="mbtn"><span>Mes decks</span><em>Importer, construire, gérer vos listes</em></button>
+      <button id="btn-refresh" class="mbtn"><span>Base de cartes</span><em id="db-status">Chargement…</em></button>
+    </nav>
+  </div>
+</section>
+
+<!-- DECKS -->
+<section id="scr-decks" class="screen">
+  <header class="topnav">
+    <button class="back" data-go="menu">← Menu</button>
+    <h2>Mes decks</h2>
+    <div class="grow"></div>
+    <button class="btn" id="btn-new-deck">+ Nouveau deck</button>
+    <button class="btn gold" id="btn-import">Importer une liste</button>
+  </header>
+  <div class="decks-layout">
+    <aside class="deck-list" id="deck-list"></aside>
+    <main class="deck-editor" id="deck-editor">
+      <div class="empty-hint">Importez une liste ou créez un deck pour commencer.</div>
+    </main>
+  </div>
+</section>
+
+<!-- LOBBY -->
+<section id="scr-lobby" class="screen">
+  <header class="topnav">
+    <button class="back" data-go="menu">← Menu</button>
+    <h2>Jouer</h2>
+  </header>
+  <div class="lobby" id="lobby"></div>
+</section>
+
+<!-- GAME -->
+<section id="scr-game" class="screen">
+  <div class="game">
+    <aside class="side">
+      <div class="preview" id="preview"><div class="preview-empty">Survolez une carte</div></div>
+      <div class="chainbox" id="stack"><div class="st-cards" data-z="chain"></div></div>
+      <div class="log" id="log"></div>
+      <form class="chat" id="chat"><input id="chat-in" placeholder="Message… (Entrée)" autocomplete="off"></form>
+    </aside>
+    <div class="table">
+      <header class="hud" id="hud"></header>
+      <div class="board" id="board"></div>
+      <div class="dock l" id="dock-l"></div>
+      <div class="dock r" id="dock-r"></div>
+    </div>
+  </div>
+  <div class="banner" id="banner"></div>
+  <div class="pregame" id="pregame"></div>
+</section>
+
+<div id="ctx" class="ctx"></div>
+<div id="modal" class="modal"></div>
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

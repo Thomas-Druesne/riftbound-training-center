@@ -1,0 +1,408 @@
+// Self-check: node test.js  (reducer rules + AI vs AI games when the card cache exists)
+const assert = require('assert');
+const fs = require('fs');
+const g = require('./game');
+const AI = require('./ai');
+
+const cards = [
+  { id: 'L', name: 'Legend', type: 'Legend', domain: ['Fury'] }, { id: 'C', name: 'Champ', type: 'Unit', energy: 2, might: 3, domain: ['Fury'] },
+  { id: 'U', name: 'Unit', type: 'Unit', energy: 2, might: 2, domain: ['Fury'], text: '[Assault 2]' },
+  { id: 'R', name: 'Fury Rune', type: 'Rune', domain: ['Fury'] }, { id: 'B1', name: 'BF1', type: 'Battlefield' }, { id: 'B2', name: 'BF2', type: 'Battlefield' },
+];
+const deck = bf => ({ name: 'T', cards: { legend: [{ id: 'L', n: 1 }], champion: [{ id: 'C', n: 1 }], main: [{ id: 'U', n: 39 }], runes: [{ id: 'R', n: 12 }], battlefields: [{ id: bf, n: 1 }, { id: bf === 'B1' ? 'B2' : 'B1', n: 1 }] } });
+function newGame(d1, d2, cs) {
+  const s = g.newState();
+  s.seats = { p1: { name: 'A' }, p2: { name: 'B' } };
+  s.auto = { p1: true, p2: true }; // tests drive both seats like the AI unless a block says otherwise
+  assert.equal(g.apply(s, { type: 'start', cards: cs, decks: { p1: d1, p2: d2 } }), null);
+  return s;
+}
+// battlefield pick -> parity + die -> mulligan
+function pregame(s, mull = { p1: [], p2: [] }) {
+  for (const p of ['p1', 'p2']) if (s.stage === 'bf' && !s.bfPick[p]) assert.equal(g.apply(s, { type: 'chooseBf', seat: p, cid: s.bfOpts[p][0] }), null);
+  const c = s.dice.caller;
+  assert.ok(g.apply(s, { type: 'rollDice', seat: c }), 'must call parity before rolling');
+  assert.ok(g.apply(s, { type: 'callParity', seat: other(c), parity: 'pair' }), 'only the caller calls');
+  assert.equal(g.apply(s, { type: 'callParity', seat: c, parity: 'pair' }), null);
+  assert.ok(s.dice.roll, 'choosing even/odd rolls the die');
+  assert.equal(s.first, (s.dice.roll % 2 === 0) ? c : other(c));
+  for (const p of ['p1', 'p2']) assert.equal(g.apply(s, { type: 'mulligan', seat: p, iids: mull[p](s) }), null);
+  assert.equal(s.stage, 'main');
+}
+const other = p => (p === 'p1' ? 'p2' : 'p1');
+
+/* ---- reducer ---- */
+const s = newGame(deck('B1'), deck('B2'), cards);
+s.auto = { p1: true, p2: true };
+const z = s.players.p1.zones;
+assert.equal(s.stage, 'bf'); assert.equal(s.bfs.length, 0);
+assert.ok(g.apply(s, { type: 'move', seat: 'p1', iid: 'c1', to: { p: 'p1', zone: 'base' } }), 'no board action before the game starts');
+g.apply(s, { type: 'chooseBf', seat: 'p1', cid: 'B1' });
+assert.equal(g.viewFor(s, 'p2').bfPick.p1, 'hidden', 'opponent pick hidden');
+assert.ok(g.apply(s, { type: 'mulligan', seat: 'p1', iids: ['c1', 'c2', 'c3'] }), 'mulligan not during bf pick');
+pregame(s, { p1: s => s.players.p1.zones.hand.slice(0, 2).map(c => c.iid), p2: () => [] });
+// the first player's turn starts automatically: ready, channel 2, draw 1
+const p1First = s.first === 'p1';
+assert.equal(z.hand.length, p1First ? 5 : 4); assert.equal(z.runes.length, p1First ? 2 : 0); assert.equal(s.bfs.length, 2);
+assert.ok(g.apply(s, { type: 'startTurn', seat: s.first }), 'turn already started');
+const v = g.viewFor(s, 'p2');
+assert.ok(v.players.p1.zones.hand.every(c => c.hidden && !c.cid), 'opponent hand hidden');
+assert.ok(v.players.p1.zones.main.every(c => !c.cid), 'opponent deck hidden');
+
+if (!p1First) { assert.equal(g.apply(s, { type: 'endTurn', seat: 'p2' }), null); assert.equal(z.runes.length, 3, 'second player channels 3 on turn 1'); }
+z.runes.forEach(r => (r.ex = true)); z.runes[0].ex = z.runes[1].ex = false; // exactly 2 ready runes
+// autopay: unit costs 2 energy -> both ready runes exhausted, unit enters exhausted
+const u = z.hand.find(c => c.cid === 'U') || (z.hand.push({ ...z.main[0], cid: 'U' }), z.hand[z.hand.length - 1]);
+assert.equal(g.apply(s, { type: 'play', seat: 'p1', iid: u.iid }), null);
+assert.ok(z.runes.every(r => r.ex) && z.base[0].ex);
+assert.ok(g.apply(s, { type: 'play', seat: 'p1', iid: z.hand[0].iid }), 'no runes left');
+// moving to an empty battlefield conquers (+1) and exhausts
+z.base[0].ex = false;
+g.apply(s, { type: 'move', seat: 'p1', iid: u.iid, to: { bf: 0, side: 'p1' } });
+assert.equal(s.bfs[0].ctrl, 'p1'); assert.equal(s.players.p1.score, 1); assert.ok(u.ex);
+// combat: 2 might + assault 2 = 4 vs a 3 might defender -> defender dies, attacker survives, conquer
+const z2 = s.players.p2.zones;
+const dfd = z2.champion[0];
+g.apply(s, { type: 'move', seat: 'p2', iid: dfd.iid, to: { bf: 1, side: 'p2' }, free: true });
+assert.equal(s.bfs[1].ctrl, 'p2');
+assert.ok(g.apply(s, { type: 'move', seat: 'p1', iid: u.iid, to: { bf: 1, side: 'p1' } }), 'exhausted unit, no Ganking: standard move refused');
+g.apply(s, { type: 'move', seat: 'p1', iid: u.iid, to: { bf: 1, side: 'p1' }, free: true });
+assert.equal(s.bfs[0].ctrl, null, 'leaving a battlefield drops control');
+assert.ok(s.showdown && s.showdown.bf === 1, 'moving into enemy units opens a showdown');
+g.apply(s, { type: 'pass', seat: 'p1' }); g.apply(s, { type: 'pass', seat: 'p2' });
+assert.equal(s.showdown, null, 'two passes: combat');
+assert.equal(s.bfs[1].ctrl, 'p1'); assert.equal(z2.trash[0].iid, dfd.iid); assert.equal(s.players.p1.score, 2);
+g.apply(s, { type: 'undo', seat: 'p1' });
+assert.equal(s.bfs[1].ctrl, 'p2', 'undo restores the combat');
+/* ---- play effects: opponent discard prompt, units enter exhausted ---- */
+{
+  const cs = [...cards, { id: 'BW', name: 'Bewitching Spirit', type: 'Unit', energy: 0, might: 2, domain: ['Fury'], text: 'When you play me, choose a player. They discard 1.' },
+    { id: 'RD', name: 'Ready Guy', type: 'Unit', energy: 0, might: 1, domain: ['Fury'], text: 'I enter ready.' }];
+  const t = newGame(deck('B1'), deck('B2'), cs);
+  pregame(t, { p1: () => [], p2: () => [] });
+  t.active = 'p1'; // p1 acts on its own turn
+  const h1 = t.players.p1.zones.hand, h2 = t.players.p2.zones.hand;
+  t.cd.BW = cs.find(c => c.id === 'BW'); t.cd.RD = cs.find(c => c.id === 'RD');
+  h1.push({ iid: 'x1', cid: 'BW', owner: 'p1', ex: false, dmg: 0, buff: 0 }, { iid: 'x2', cid: 'RD', owner: 'p1', ex: false, dmg: 0, buff: 0 });
+  assert.ok(g.apply(t, { type: 'play', seat: 'p1', iid: 'x1', to: { bf: 0 } }), 'non-Ambush units cannot be played to a battlefield');
+  assert.equal(g.apply(t, { type: 'play', seat: 'p1', iid: 'x1' }), null);
+  assert.ok(t.players.p1.zones.base.find(c => c.iid === 'x1').ex, 'units enter exhausted');
+  assert.equal(t.pending.kind, 'discard'); assert.equal(t.pending.to, 'p2');
+  assert.ok(g.apply(t, { type: 'draw', seat: 'p1' }), 'blocked while the opponent chooses');
+  const n2 = h2.length;
+  const ai = AI.next(t, 'p2', 'hard', {});
+  assert.equal(ai.type, 'resolve', 'AI answers the discard prompt');
+  assert.equal(g.apply(t, { ...ai, seat: 'p2' }), null);
+  assert.equal(h2.length, n2 - 1); assert.equal(t.pending, null);
+  g.apply(t, { type: 'play', seat: 'p1', iid: 'x2' });
+  assert.equal(t.players.p1.zones.base.find(c => c.iid === 'x2').ex, false, '"I enter ready" units stay ready');
+}
+/* ---- rune pool, Deathknell tokens, buff prompt ---- */
+{
+  const cs = [...cards, { id: 'FF', name: 'Ferrous Forerunner', type: 'Unit', energy: 6, power: 1, might: 6, domain: ['Fury'], text: '[Deathknell] — Play two 3 :rb_might: Mech unit tokens to your base. (When I die, get the effect.)' },
+    { id: 'PR', name: 'Pit Rookie', type: 'Unit', energy: 0, might: 2, domain: ['Fury'], text: "When you play me, buff another friendly unit. (If it doesn't have a buff, it gets a +1 :rb_might: buff.)" }];
+  const t = newGame(deck('B1'), deck('B2'), cs);
+  pregame(t, { p1: () => [], p2: () => [] });
+  const P = t.first, Z = t.players[P].zones;
+  t.auto = { p1: true, p2: true };
+  t.cd.FF = cs[cs.length - 2]; t.cd.PR = cs[cs.length - 1];
+  while (Z.runes.length < 7) g.apply(t, { type: 'channel', seat: P, n: 1 });
+  // exhaust 6 runes by hand and recycle a 7th: the pool pays the whole cost
+  Z.runes.slice(0, 6).forEach(r => g.apply(t, { type: 'exhaust', seat: P, iid: r.iid }));
+  g.apply(t, { type: 'recycle', seat: P, iid: Z.runes[6].iid });
+  assert.deepEqual([t.players[P].pool.e, t.players[P].pool.p.length], [6, 1]);
+  Z.hand.push({ iid: 'ff', cid: 'FF', owner: P, ex: false, dmg: 0, buff: 0 });
+  assert.equal(g.apply(t, { type: 'play', seat: P, iid: 'ff' }), null, 'pool pays 6 energy + 1 power');
+  assert.deepEqual([t.players[P].pool.e, t.players[P].pool.p.length], [0, 0]);
+  g.apply(t, { type: 'kill', seat: P, iid: 'ff' });
+  const mechs = Z.base.filter(c => t.cd[c.cid].name === 'Mech');
+  assert.equal(mechs.length, 2, 'Deathknell plays two Mech tokens'); assert.equal(g.hp(t, mechs[0]), 3);
+  g.apply(t, { type: 'move', seat: P, iid: mechs[0].iid, to: { p: P, zone: 'trash' } });
+  assert.ok(!Z.trash.some(c => c.iid === mechs[0].iid), 'tokens vanish outside the board');
+  Z.hand.push({ iid: 'pr', cid: 'PR', owner: P, ex: false, dmg: 0, buff: 0 });
+  g.apply(t, { type: 'token', seat: P, name: 'Recruit', n: 1 });
+  assert.equal(g.apply(t, { type: 'play', seat: P, iid: 'pr' }), null);
+  assert.equal(t.pending.kind, 'buff', 'two other units: choose one');
+  assert.ok(g.apply(t, { type: 'resolve', seat: P, iids: ['pr'] }), 'not itself');
+  assert.equal(g.apply(t, { type: 'resolve', seat: P, iids: [mechs[1].iid] }), null);
+  assert.equal(g.hp(t, mechs[1]), 4, 'buffed +1');
+}
+/* ---- core rules: scoring once per turn, final point, Burn Out, timing, targets, Hidden, Equip ---- */
+{
+  const cs = [...cards,
+    { id: 'BOLT', name: 'Bolt', type: 'Spell', energy: 0, domain: ['Fury'], text: 'Deal 3 to a unit at a battlefield.' },
+    { id: 'RX', name: 'Quick', type: 'Spell', energy: 0, domain: ['Fury'], text: '[Reaction] (Play any time.) Draw 1.' },
+    { id: 'HID', name: 'Sneak', type: 'Spell', energy: 5, domain: ['Fury'], text: '[Hidden] (Hide now.) Draw 2.' },
+    { id: 'SW', name: 'Sword', type: 'Gear', energy: 0, might: 3, domain: ['Fury'], tags: ['Equipment'], text: '[Equip] :rb_rune_fury: (Attach.)' }];
+  const t = newGame(deck('B1'), deck('B2'), cs);
+  pregame(t, { p1: () => [], p2: () => [] });
+  for (const c of cs.slice(-4)) t.cd[c.id] = c;
+  t.auto = { p1: true, p2: true };
+  const P = t.active, O = other(P), Z = t.players[P].zones, pl = t.players[P];
+  const mkc = (id, cid, who = P) => ({ iid: id, cid, owner: who, ex: false, dmg: 0, buff: 0 });
+  // conquer once per battlefield per turn
+  const a = mkc('a1', 'U'); Z.base.push(a);
+  g.apply(t, { type: 'move', seat: P, iid: 'a1', to: { bf: 0, side: P } });
+  assert.equal(pl.score, 1);
+  g.apply(t, { type: 'move', seat: P, iid: 'a1', to: { p: P, zone: 'base' }, free: true });
+  g.apply(t, { type: 'move', seat: P, iid: 'a1', to: { bf: 0, side: P }, free: true });
+  assert.equal(pl.score, 1, 'a battlefield scores once per turn');
+  // final point: at 7, conquering without having scored every battlefield draws instead
+  pl.score = 7; const h0 = Z.hand.length;
+  const b = mkc('b1', 'U'); Z.base.push(b);
+  t.scored[P] = []; // pretend bf 0 was not scored
+  g.apply(t, { type: 'move', seat: P, iid: 'b1', to: { bf: 1, side: P } });
+  assert.equal(pl.score, 7, 'final point refused'); assert.equal(Z.hand.length, h0 + 1, 'draws instead');
+  // timing: a normal card cannot be played on the opponent's turn, a Reaction can
+  const oz = t.players[O].zones; oz.hand.push(mkc('rx', 'RX', O), mkc('nx', 'U', O));
+  assert.ok(g.apply(t, { type: 'play', seat: O, iid: 'nx' }), 'not your turn');
+  assert.equal(g.apply(t, { type: 'play', seat: O, iid: 'rx' }), null, 'Reaction on the opponent turn');
+  assert.equal(t.chain.length, 1, 'spells go on the stack');
+  g.apply(t, { type: 'chainPass', seat: P }); g.apply(t, { type: 'chainResolve', seat: O });
+  assert.equal(t.chain.length, 0);
+  // targeted spell: pre-chosen target, damage kills
+  const e1 = mkc('e1', 'U', O); t.bfs[1].units[O].push(e1);
+  Z.hand.push(mkc('bolt', 'BOLT'));
+  assert.equal(g.apply(t, { type: 'play', seat: P, iid: 'bolt', targets: ['e1'] }), null);
+  g.apply(t, { type: 'chainPass', seat: O }); g.apply(t, { type: 'chainResolve', seat: P });
+  assert.ok(oz.trash.some(c => c.iid === 'e1'), 'Bolt kills the 2 might unit');
+  // Burn Out: empty deck -> trash shuffled in, opponent +1
+  const os = t.players[O].score; Z.trash.push(...Z.main.splice(0));
+  g.apply(t, { type: 'draw', seat: P, n: 1 });
+  assert.equal(t.players[O].score, os + 1, 'Burn Out gives the opponent 1 point'); assert.ok(Z.main.length > 0);
+  // Hidden: 1 power to hide at a controlled battlefield, played free next turn
+  while (Z.runes.length < 3) g.apply(t, { type: 'channel', seat: P, n: 1 });
+  Z.hand.push(mkc('hid', 'HID'));
+  assert.equal(g.apply(t, { type: 'hide', seat: P, iid: 'hid', bf: 1 }), null);
+  assert.equal(t.bfs[1].hidden.length, 1); assert.ok(g.viewFor(t, O).bfs[1].hidden[0].hidden, 'hidden from the opponent');
+  assert.ok(g.apply(t, { type: 'play', seat: P, iid: 'hid' }), 'not the same turn');
+  t.turn++;
+  assert.equal(g.apply(t, { type: 'play', seat: P, iid: 'hid' }), null, 'free next turn');
+  // Equip: +3 might
+  Z.base.push(mkc('sw', 'SW'));
+  Z.runes.forEach(r => (r.ex = false));
+  assert.equal(g.apply(t, { type: 'equip', seat: P, iid: 'sw', unit: 'b1' }), null);
+  assert.equal(g.hp(t, b), 5, 'equipment adds its Might');
+}
+/* ---- manual human vs AI: no payment, stack, AI reacts, opponent-side effects only ---- */
+{
+  const cs = [...cards,
+    { id: 'SAB', name: 'Sabotage', type: 'Spell', energy: 1, power: 1, domain: ['Fury'], text: 'Choose an opponent. They reveal their hand. Choose a non-unit card from it, and recycle that card.' },
+    { id: 'CTR', name: 'Nope', type: 'Spell', energy: 0, domain: ['Fury'], text: '[Reaction] (Play any time.) Counter a spell.' },
+    { id: 'PUMP', name: 'Pump', type: 'Spell', energy: 0, domain: ['Fury'], text: '[Action] (Showdowns.) Give a unit +5 :rb_might: this turn.' }];
+  const t = newGame(deck('B1'), deck('B2'), cs);
+  pregame(t, { p1: () => [], p2: () => [] });
+  for (const c of cs.slice(-3)) t.cd[c.id] = c;
+  const H = t.active, A = other(H); t.auto = { [A]: true };
+  const ZH = t.players[H].zones, ZA = t.players[A].zones;
+  const mkc = (id, cid, who) => ({ iid: id, cid, owner: who, ex: false, dmg: 0, buff: 0 });
+  const ready = ZH.runes.filter(r => !r.ex).length;
+  ZH.hand.push(mkc('sab', 'SAB', H));
+  assert.equal(g.apply(t, { type: 'play', seat: H, iid: 'sab' }), null, 'human plays without paying');
+  assert.equal(ZH.runes.filter(r => !r.ex).length, ready, 'no rune touched');
+  assert.ok(g.apply(t, { type: 'chainResolve', seat: H }), 'the AI decides first');
+  assert.deepEqual(AI.next(t, A, 'hard', {}), { type: 'chainPass' }, 'nothing to answer with');
+  g.apply(t, { type: 'chainPass', seat: A });
+  assert.equal(g.apply(t, { type: 'chainResolve', seat: H }), null);
+  assert.ok(ZA.hand.every(c => c.rev), 'Sabotage reveals the AI hand');
+  assert.ok(g.viewFor(t, H).players[A].zones.hand.every(c => c.cid), 'the human sees it');
+  // the AI counters a costly spell
+  ZA.hand.push(mkc('ctr', 'CTR', A)); ZH.hand.push(mkc('sab2', 'SAB', H));
+  g.apply(t, { type: 'play', seat: H, iid: 'sab2' });
+  const r = AI.next(t, A, 'hard', {});
+  assert.equal(r.iid, 'ctr', 'hard AI counters');
+  assert.equal(g.apply(t, { ...r, seat: A }), null);
+  g.apply(t, { type: 'chainPass', seat: H });
+  assert.equal(t.chain.length, 0); assert.ok(ZH.trash.some(c => c.iid === 'sab2'), 'countered');
+}
+{
+  const cs = [...cards, { id: 'PUMP', name: 'Pump', type: 'Spell', energy: 0, domain: ['Fury'], text: '[Action] (Showdowns.) Give a unit +5 :rb_might: this turn.' }];
+  const t = newGame(deck('B1'), deck('B2'), cs);
+  pregame(t, { p1: () => [], p2: () => [] });
+  t.cd.PUMP = cs[cs.length - 1];
+  const H = t.active, A = other(H); t.auto = { [A]: true };
+  const mkc = (id, cid, who) => ({ iid: id, cid, owner: who, ex: false, dmg: 0, buff: 0 });
+  t.bfs[0].units[A].push(mkc('a1', 'U', A)); t.bfs[0].ctrl = A;
+  t.players[H].zones.base.push(mkc('h1', 'U', H));
+  t.players[A].zones.hand.push(mkc('pump', 'PUMP', A));
+  g.apply(t, { type: 'move', seat: H, iid: 'h1', to: { bf: 0, side: H } });
+  assert.ok(t.showdown && t.showdown.focus === H, 'attacker has Focus');
+  g.apply(t, { type: 'pass', seat: H });
+  const r = AI.next(t, A, 'hard', {});
+  assert.deepEqual([r.type, r.iid, r.targets[0]], ['play', 'pump', 'a1'], 'AI answers the attack with a combat trick');
+  g.apply(t, { ...r, seat: A });
+  g.apply(t, { type: 'chainPass', seat: H }); // let it resolve
+  assert.equal(t.showdown.focus, H, 'Focus back to the attacker');
+  g.apply(t, { type: 'pass', seat: H });
+  g.apply(t, { ...AI.next(t, A, 'hard', {}), seat: A });
+  assert.equal(t.showdown, null);
+  assert.equal(t.bfs[0].units[H].length, 1, 'manual mode: no automatic combat damage');
+  g.apply(t, { type: 'fight', seat: H, bf: 0, att: H }); // the human asks for the calculation (⚔)
+  assert.ok(t.players[H].zones.trash.some(c => c.iid === 'h1'), 'attacker died'); assert.equal(t.bfs[0].ctrl, A);
+}
+/* ---- a human draws the opening hand and the mulligan replacements by hand ---- */
+{
+  const t = g.newState(); t.seats = { p1: { name: 'A' }, p2: { name: 'B' } }; t.auto = { p2: true };
+  g.apply(t, { type: 'start', cards, decks: { p1: deck('B1'), p2: deck('B2') } });
+  for (const p of ['p1', 'p2']) g.apply(t, { type: 'chooseBf', seat: p, cid: t.bfOpts[p][0] });
+  g.apply(t, { type: 'callParity', seat: t.dice.caller, parity: 'pair' });
+  const hand = () => t.players.p1.zones.hand;
+  assert.equal(hand().length, 4, 'opening hand drawn for everyone');
+  const out = [hand()[0].iid, hand()[1].iid];
+  g.apply(t, { type: 'mulligan', seat: 'p1', iids: out });
+  assert.equal(hand().length, 4, 'replacements drawn at once');
+  assert.equal(t.players.p1.mullNew.length, 2, 'the new cards are shown'); assert.ok(!t.players.p1.mullDone);
+  assert.ok(!hand().some(c => out.includes(c.iid)) && t.players.p1.zones.main.slice(-2).every(c => out.includes(c.iid)), 'sent under the deck');
+  assert.equal(g.apply(t, { type: 'mullConfirm', seat: 'p1' }), null);
+  assert.ok(t.players.p1.mullDone);
+  g.apply(t, { type: 'mulligan', seat: 'p2', iids: [] });
+  assert.equal(t.stage, 'main');
+  const z = t.players[t.active].zones, n = z.hand.length;
+  if (t.active === 'p1') assert.equal(n, 4, 'the human draws the turn card by hand');
+}
+{
+  const t = newGame(deck('B1'), deck('B2'), cards);
+  pregame(t, { p1: () => [], p2: () => [] });
+  const mkc = (id, cid, who) => ({ iid: id, cid, owner: who, ex: false, dmg: 0, buff: 0 });
+  const A = mkc('d1', 'C', 'p1'), B = mkc('d2', 'U', 'p2'); A.tb = 2; // champion 3 +2 = 5 vs unit 2
+  t.players.p1.zones.base.push(A); t.bfs[0].units.p2.push(B);
+  assert.equal(g.apply(t, { type: 'duel', seat: 'p1', iid: 'd1', target: 'd2' }), null);
+  assert.ok(t.players.p2.zones.trash.some(c => c.iid === 'd2'), 'duel kills the weaker unit'); assert.equal(A.dmg, 2);
+}
+{ // declared targets stay on the stack item; Hidden in manual mode; Hidden without brackets
+  assert.ok(require('./rules').kw('Hidden (Hide now for :rb_rune_rainbow: to react with later.) When you play me...').hidden);
+  const cs = [...cards, { id: 'S', name: 'Zap', type: 'Spell', energy: 0, domain: ['Fury'], text: 'Deal 3 to a unit. Deal 3 to a unit.' },
+    { id: 'H', name: 'Sneak', type: 'Unit', energy: 2, might: 2, domain: ['Fury'], text: '[Hidden] (Hide now.)' }];
+  const t = newGame(deck('B1'), deck('B2'), cs);
+  pregame(t, { p1: () => [], p2: () => [] });
+  t.auto = { p2: true }; t.active = 'p1'; t.cd.S = cs[6]; t.cd.H = cs[7];
+  const mkc = (id, cid, who) => ({ iid: id, cid, owner: who, ex: false, dmg: 0, buff: 0 });
+  t.bfs[0].units.p1.push(mkc('h1', 'U', 'p1')); t.bfs[1].units.p2.push(mkc('h2', 'U', 'p2'), mkc('h4', 'U', 'p2'));
+  t.players.p1.zones.hand.push(mkc('z1', 'S', 'p1'), mkc('z2', 'H', 'p1'));
+  assert.equal(g.apply(t, { type: 'play', seat: 'p1', iid: 'z1', targets: ['h2', 'nope', 7, 'h4'] }), null);
+  assert.deepEqual(t.chain[t.chain.length - 1].cb.targets, ['h2', 'h4'], 'only real targets are kept');
+  g.apply(t, { type: 'chainPass', seat: 'p2' }); g.apply(t, { type: 'chainResolve', seat: 'p1' });
+  assert.ok(!t.chain.length);
+  assert.ok(!t.bfs[1].units.p2.length && t.bfs[0].units.p1.length === 1, 'the spell hits the declared targets only');
+  t.bfs[1].units.p2.push(mkc('h5', 'U', 'p2'));
+  assert.ok(g.apply(t, { type: 'hide', seat: 'p1', iid: 'z2', bf: 1 }), 'not where the opponent has units');
+  assert.equal(g.apply(t, { type: 'hide', seat: 'p1', iid: 'z2', bf: 0 }), null, 'manual: your units there are enough');
+  assert.equal(t.bfs[0].ctrl, 'p1'); assert.equal(t.bfs[0].hidden[0].iid, 'z2');
+  // undo past the opening of a showdown removes it
+  assert.ok(!t.showdown);
+  assert.equal(g.apply(t, { type: 'move', seat: 'p1', iid: 'h1', to: { bf: 1, side: 'p1' }, free: true }), null);
+  assert.ok(t.showdown, 'moving next to an enemy unit opens a showdown');
+  assert.equal(g.apply(t, { type: 'undo', seat: 'p1' }), null);
+  assert.ok(!t.showdown, 'undo removes the showdown');
+  // the AI declares both targets of a two-target spell when casting
+  const u = newGame(deck('B1'), deck('B2'), cs);
+  pregame(u, { p1: () => [], p2: () => [] });
+  u.cd.S = cs[6]; u.active = 'p2'; u.players.p2.zones.hand = [mkc('y1', 'S', 'p2')];
+  u.bfs[0].units.p1.push(mkc('e1', 'C', 'p1'), mkc('e2', 'U', 'p1'));
+  let cast = null;
+  for (let i = 0; i < 20 && !cast; i++) { const a = AI.next(u, 'p2', 'hard', {}); if (!a) break; if (a.type === 'play' && a.iid === 'y1') cast = a; else break; }
+  assert.ok(cast, 'the AI casts the spell'); assert.deepEqual(cast.targets.length, 2, 'two targets declared');
+}
+{ // card effects from the per-card table, on the real card texts
+  const real = fs.existsSync('./data/cards.json') ? require('./data/cards.json') : null;
+  const get = n => real && real.find(c => c.name === n);
+  if (real) {
+    const cs = [...cards, ...['Thrill of the Hunt', 'Challenge', 'Defy', 'Falling Star', 'Cannon Barrage', 'Singularity', 'Hush'].map(get)];
+    const setup = () => {
+      const t = newGame(deck('B1'), deck('B2'), cs);
+      pregame(t, { p1: () => [], p2: () => [] });
+      for (const c of cs) t.cd[c.id] = c;
+      t.auto = {}; t.active = 'p1';
+      return t;
+    };
+    const mkc = (id, name, who) => ({ iid: id, cid: name.length > 2 ? get(name).id : name, owner: who, ex: false, dmg: 0, buff: 0 });
+    const cast = (t, who, iid, targets, extra = {}) => { assert.equal(g.apply(t, { type: 'play', seat: who, iid, targets, ...extra }), null); };
+    const pass = (t, who) => assert.equal(g.apply(t, { type: 'chainPass', seat: other(who) }), null);
+    // Thrill of the Hunt during a showdown: the unit is banished and played to the chosen battlefield
+    let s1 = setup();
+    s1.bfs[0].units.p1.push(mkc('a1', 'U', 'p1')); s1.bfs[1].units.p1.push(mkc('a2', 'C', 'p1')); s1.bfs[0].units.p2.push(mkc('b1', 'U', 'p2'));
+    s1.showdown = { bf: 0, att: 'p1', focus: 'p1', passes: 0, fresh: false, last: null };
+    s1.players.p1.zones.hand.push(mkc('th', 'Thrill of the Hunt', 'p1'));
+    cast(s1, 'p1', 'th', ['a2']); pass(s1, 'p1');
+    assert.equal(s1.pending.kind, 'bf', 'the human chooses the battlefield');
+    assert.equal(g.apply(s1, { type: 'resolve', seat: 'p1', bf: 0 }), null);
+    assert.ok(s1.bfs[0].units.p1.some(c => c.iid === 'a2') && !s1.bfs[1].units.p1.length, 'Thrill: unit joins the fight');
+    // Challenge: the two chosen units deal their Might to each other (declared in any order)
+    let s2 = setup();
+    s2.bfs[0].units.p1.push(mkc('a1', 'C', 'p1')); s2.bfs[1].units.p2.push(mkc('b1', 'U', 'p2'));
+    s2.players.p1.zones.hand.push(mkc('ch', 'Challenge', 'p1'));
+    cast(s2, 'p1', 'ch', ['b1', 'a1']); pass(s2, 'p1');
+    assert.ok(!s2.bfs[1].units.p2.length && s2.bfs[0].units.p1[0].dmg === 2, 'Challenge: 3 kills the 2, takes 2');
+    // Defy counters a cheap spell, not one costing 2 Power (Hush does)
+    let s3 = setup();
+    s3.bfs[0].units.p2.push(mkc('b1', 'U', 'p2'), mkc('b2', 'U', 'p2'));
+    s3.players.p1.zones.hand.push(mkc('fs', 'Falling Star', 'p1')); s3.players.p2.zones.hand.push(mkc('df', 'Defy', 'p2'), mkc('hu', 'Hush', 'p2'));
+    cast(s3, 'p1', 'fs', ['b1', 'b2']);
+    cast(s3, 'p2', 'df', []); pass(s3, 'p2');
+    assert.equal(s3.chain.length, 1, 'Defy cannot counter a 2-Power spell');
+    cast(s3, 'p2', 'hu', []); pass(s3, 'p2');
+    assert.equal(s3.chain.length, 0, 'Hush counters it'); assert.equal(s3.bfs[0].units.p2.length, 2);
+    // Cannon Barrage: 2 to every enemy unit in the combat only
+    let s4 = setup();
+    s4.bfs[0].units.p2.push(mkc('b1', 'U', 'p2')); s4.bfs[1].units.p2.push(mkc('b2', 'U', 'p2')); s4.bfs[0].units.p1.push(mkc('a1', 'C', 'p1'));
+    s4.showdown = { bf: 0, att: 'p1', focus: 'p1', passes: 0, fresh: false, last: null };
+    s4.players.p1.zones.hand.push(mkc('cb', 'Cannon Barrage', 'p1'));
+    cast(s4, 'p1', 'cb', []); pass(s4, 'p1');
+    assert.ok(!s4.bfs[0].units.p2.length && s4.bfs[1].units.p2.length === 1 && !s4.bfs[0].units.p1[0].dmg);
+    // a blinked unit is a new object: Falling Star loses that target
+    let s5 = setup();
+    s5.bfs[0].units.p2.push(mkc('b1', 'U', 'p2'), mkc('b2', 'U', 'p2'));
+    s5.players.p1.zones.hand.push(mkc('fs', 'Falling Star', 'p1')); s5.players.p2.zones.hand.push(mkc('th', 'Thrill of the Hunt', 'p2'));
+    cast(s5, 'p1', 'fs', ['b1', 'b2']);
+    cast(s5, 'p2', 'th', ['b1'], { bf: 0 }); pass(s5, 'p2');
+    pass(s5, 'p1');
+    assert.ok(s5.bfs[0].units.p2.some(c => c.iid === 'b1') && !s5.bfs[0].units.p2.some(c => c.iid === 'b2'), 'only the other target is hit');
+    // optional targets: Singularity with one declared target hits only it
+    let s6 = setup();
+    s6.bfs[0].units.p2.push(mkc('b1', 'C', 'p2')); s6.bfs[0].units.p1.push(mkc('a1', 'C', 'p1'));
+    s6.players.p1.zones.hand.push(mkc('si', 'Singularity', 'p1'));
+    cast(s6, 'p1', 'si', ['b1']); pass(s6, 'p1');
+    assert.ok(!s6.pending && !s6.bfs[0].units.p2.length && s6.bfs[0].units.p1.length === 1, 'the second hit is skipped');
+    // the AI saves its unit: Thrill of the Hunt in answer to a lethal spell
+    let s7 = setup(); s7.auto = { p2: true };
+    s7.bfs[0].units.p2.push(mkc('b1', 'C', 'p2'));
+    s7.players.p1.zones.hand.push(mkc('fs', 'Falling Star', 'p1')); s7.players.p2.zones.hand = [mkc('th', 'Thrill of the Hunt', 'p2')];
+    s7.players.p2.pool = { e: 5, p: ['any', 'any'] };
+    cast(s7, 'p1', 'fs', ['b1']);
+    const r7 = AI.next(s7, 'p2', 'normal', {});
+    assert.equal(r7.iid, 'th', 'the AI answers with Thrill of the Hunt');
+  }
+}
+console.log('reducer OK');
+
+/* ---- AI vs AI on real data ---- */
+if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
+  const all = require('./data/cards.json'), decks = require('./data/decks.json');
+  const play = (l1, l2) => {
+    const d = decks[play.n = ((play.n || 0) + 1) % decks.length]; // mirror matches across all starter decks
+    const s = newGame(d, d, all);
+    s.auto = { p1: true, p2: true };
+    const lv = { p1: l1, p2: l2 }, mem = { p1: {}, p2: {} };
+    let steps = 0;
+    while (s.stage !== 'main' && steps++ < 20) for (const p of ['p1', 'p2']) { const a = AI.next(s, p, lv[p], mem[p]); if (a) assert.equal(g.apply(s, { ...a, seat: p, p }), null); }
+    assert.equal(s.stage, 'main', 'AI completes the pre-game');
+    while (!s.winner && s.turn < 60 && steps++ < 5000) {
+      let p = s.active, a = AI.next(s, p, lv[p], mem[p]);
+      if (!a) { p = other(p); a = AI.next(s, p, lv[p], mem[p]); }
+      assert.ok(a, 'some AI must always have an action');
+      if (g.apply(s, { ...a, seat: p, p })) mem[p].q = [];
+    }
+    return s.winner || 'draw';
+  };
+  const t0 = Date.now();
+  const res = { hard: 0, easy: 0, draw: 0 };
+  for (let i = 0; i < 10; i++) {
+    const hardFirst = i % 2 === 0, w = play(hardFirst ? 'hard' : 'easy', hardFirst ? 'easy' : 'hard');
+    res[w === 'draw' ? 'draw' : (w === 'p1') === hardFirst ? 'hard' : 'easy']++;
+  }
+  const r2 = { normal: 0, easy: 0, draw: 0 };
+  for (let i = 0; i < 10; i++) { const w = play('normal', 'easy'); r2[w === 'p1' ? 'normal' : w === 'p2' ? 'easy' : 'draw']++; }
+  console.log('hard vs easy', res, '| normal vs easy', r2, `| ${Date.now() - t0} ms`);
+  assert.ok(res.hard > res.easy, 'hard should beat easy');
+}
+console.log('self-check OK');

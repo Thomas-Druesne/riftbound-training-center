@@ -1,0 +1,10 @@
+{
+  "name": "riftbound-training-center",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Simulateur local de Riftbound pour s'entrainer (LAN / meme PC).",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  }
+}

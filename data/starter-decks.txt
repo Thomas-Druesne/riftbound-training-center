@@ -1,0 +1,148 @@
+Deck: Rengar
+Legend:
+1 Rengar, Pridestalker
+Champion:
+1 Rengar, Trophy Hunter
+MainDeck:
+1 Sabotage
+3 Punch First
+3 Irresistible Faefolk
+3 Pit Rookie
+3 Pouty Poro
+2 Thrill of the Hunt
+3 First Mate
+3 Grim Apothecary
+3 Kinkou Initiate
+2 Rampage
+2 Nidalee, Cat Form
+3 Kai'Sa, Survivor
+3 Noxus Hopeful
+3 Elnuk Herd
+2 Ferrous Forerunner
+Battlefields:
+1 Seat of Power
+1 Sandswept Tomb
+1 Rakelstake
+Runes:
+8 Body Rune
+4 Fury Rune
+
+Deck: Nasus
+Legend:
+1 Nasus, Curator of the Sands
+Champion:
+1 Nasus, Guardian of Knowledge
+MainDeck:
+3 Life from Stone
+3 Stupefy
+3 Bellows Breath
+3 Defy
+1 Hush
+3 Discipline
+3 Lonely Poro
+3 Ravenbloom Student
+3 Scuttle Crab
+3 Temporal Breach
+3 Find Your Center
+3 Thousand-Tailed Watcher
+3 The Empyrean
+1 Whiteflame Protector
+1 Time Warp
+Battlefields:
+1 Ruined Monastery
+1 Rockfall Path
+1 Sigil of the Storm
+Runes:
+5 Calm Rune
+7 Mind Rune
+
+Deck: Kai'Sa
+Legend:
+1 Kai'Sa, Daughter of the Void
+Champion:
+1 Kai'Sa, Survivor
+MainDeck:
+3 Stupefy
+2 Bellows Breath
+3 Hextech Ray
+3 Plundering Poro
+3 Watchful Sentry
+1 Brittle Steel
+1 Get Excited!
+2 Smoke Screen
+3 Falling Star
+2 Bilgewater Tracker
+2 Lecturing Yordle
+1 Perfect Execution
+3 Noxus Hopeful
+2 Ferrous Forerunner
+1 Singularity
+3 Thousand-Tailed Watcher
+2 The Empyrean
+2 Time Warp
+Battlefields:
+1 Void Gate
+1 Frozen Fortress
+1 Rockfall Path
+Runes:
+6 Fury Rune
+6 Mind Rune
+
+Deck: Rek'Sai
+Legend:
+1 Rek'Sai, Void Burrower
+Champion:
+1 Rek'Sai, Breacher
+MainDeck:
+3 Concert Poster
+3 Carrion Dredger
+3 Inferna
+3 Trifarian Captain
+3 Cull the Weak
+1 Long Sword
+3 Falling Star
+3 Bilgewater Tracker
+3 Faithful Manufactor
+1 Grim Apothecary
+1 Hunting Dog
+3 Shimmering Swimmer
+3 Rengar, Pouncing
+3 Noxus Hopeful
+3 Undertitan
+Battlefields:
+1 The Candlelit Sanctum
+1 Ruined Monastery
+1 Hunters' Circle
+Runes:
+8 Fury Rune
+4 Order Rune
+
+Deck: Azir
+Legend:
+1 Azir, Emperor of the Sands
+Champion:
+1 Azir, Sovereign
+MainDeck:
+3 Doran's Shield
+3 Eye of the Herald
+3 Soul Sword
+3 Defy
+2 Battle Preparations
+3 Brutalizer
+2 Deathgrip
+3 Discipline
+2 Hand Hammer
+2 Trifarian Captain
+2 Hidden Blade
+2 Back Off
+2 Guards!
+1 Orianna, Exquisite
+3 B.F. Sword
+3 Arise!
+Battlefields:
+1 Trifarian War Camp
+1 Hall of Legends
+1 Seat of Power
+Runes:
+7 Calm Rune
+5 Order Rune
