@@ -35,6 +35,13 @@ Banc d'essai joueur contre IA : un robot joue le siège humain en mode manuel (p
 combats à la main, cartes et cibles parfois au hasard, réponses sur la pile) contre la vraie IA, sur tous les decks.
 Il signale les blocages (personne ne peut agir), les plantages et les actions refusées en boucle.
 
+```
+node e2e.js [parties=6] [niveau=normal]
+```
+
+Parties complètes à travers le vrai serveur (HTTP, SSE et tours de l'IA avec leurs pauses, accélérées), comme le
+navigateur. Échoue si la partie s'arrête de bouger. À lancer après toute modification de `server.js` ou de `ai.js`.
+
 `node seed-legend-decks.js` ajoute un deck de test légal pour chaque légende qui n'en a pas (`data/decks.json`).
 
 ## Organisation

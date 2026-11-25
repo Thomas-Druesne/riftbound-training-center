@@ -134,12 +134,14 @@ async function startRoom(r) {
   broadcast(r);
   aiTick(r);
 }
+const AI_SPEED = process.env.AI_SPEED != null ? Number(process.env.AI_SPEED) : 1; // tests: 0 = no pause
 const AI_DELAY = { pass: 900, chainPass: 900, chainResolve: 700, resolve: 900, startTurn: 1000, fight: 1100, endTurn: 800, play: 750, move: 550, chooseBf: 1500, callParity: 1400, rollDice: 1200, mulligan: 1800 };
 // The AI's next action. A bug in the AI must never freeze the game: fall back to the safe move (let the spell
 // resolve, pass, answer the prompt, end the turn).
-function aiNext(r) {
+// peek: only look (AI.next advances the AI's plan in mem, so a look uses a copy)
+function aiNext(r, peek) {
   const s = r.state, me = r.ai.seat;
-  try { return AI.next(s, me, r.ai.level, r.ai.mem); }
+  try { return AI.next(s, me, r.ai.level, peek ? structuredClone(r.ai.mem) : r.ai.mem); }
   catch (e) {
     console.error('AI error:', e);
     r.ai.mem = {};
@@ -154,7 +156,7 @@ function aiNext(r) {
 // pause ends: the human may have played in between (a reaction on the stack...), and a stale choice would skip it.
 function aiTick(r) {
   if (!r.ai || r.timer || !rooms.has(r.tag)) return;
-  const first = aiNext(r);
+  const first = aiNext(r, true);
   if (!first) return;
   r.timer = setTimeout(() => {
     r.timer = null;
@@ -168,7 +170,7 @@ function aiTick(r) {
     }
     broadcast(r);
     aiTick(r);
-  }, AI_DELAY[first.type] || 600);
+  }, (AI_DELAY[first.type] || 600) * AI_SPEED);
 }
 const deckById = id => readDecks().find(d => d.id === id);
 

@@ -821,7 +821,7 @@ function renderPregame() {
     if (pl.mullNew) {
       body = [h('div', { class: 'pg-step' }, 'Étape 3 sur 3'), h('h2', {}, 'Votre main'),
         h('p', {}, `Les cartes repiochées sont en surbrillance. ${pname(v.first)} commence.`),
-        h('div', { class: 'pg-cards' }, hand.map(c => { const d = cardOf(c), el = cardView(d, { cls: pl.mullNew.includes(c.iid) ? 'fresh' : '' }); el.onmouseenter = () => showPreview(d, c); return el; })),
+        h('div', { class: 'pg-cards' }, hand.map(c => { const d = cardOf(c), k = pl.mullNew.indexOf(c.iid), el = cardView(d, { cls: k >= 0 ? 'fresh' : '' }); if (k >= 0) el.style.setProperty('--d', (0.15 + k * 0.22) + 's'); el.onmouseenter = () => showPreview(d, c); return el; })),
         h('div', { class: 'pg-actions' }, h('button', { class: 'btn gold big', onclick: () => send({ type: 'mullConfirm' }) }, 'Commencer la partie'))];
     } else body = [h('div', { class: 'pg-step' }, 'Étape 3 sur 3'), h('h2', {}, 'Mulligan'),
       h('p', {}, done ? `${pname(op)} choisit sa main…` : `${pname(v.first)} commence. Cliquez jusqu’à 2 cartes à renvoyer sous votre deck : vous en repiochez autant.`),
