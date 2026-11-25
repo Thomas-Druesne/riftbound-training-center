@@ -16,6 +16,8 @@ function kw(text) {
     onPlayDraw: n(/When you play me, draw (\d+)/i),
     // Ambush / "can be played to a battlefield": may enter directly where you already have units
     ambush: /\[Ambush\]|can be played to a battlefield/i.test(t),
+    // Rengar, Trophy Hunter: "I can be played to a battlefield where there are enemy units"
+    toEnemyBf: /can be played to a battlefield where there are enemy units/i.test(t),
     temporary: /\[Temporary\]/.test(t) && !/Give (?:a|it|that)[^.]*\[Temporary\]/i.test(t),
     hunt: n(/\[Hunt(?: (\d+))?\]/),
     deathDraw: n(/\[Deathknell\]\s*\[(?:>|&gt;)\]\s*Draw (\d+)\./),

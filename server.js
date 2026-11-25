@@ -128,7 +128,8 @@ function broadcast(r) {
 }
 async function startRoom(r) {
   await loadCards(false);
-  r.state.auto = r.ai ? { [r.ai.seat]: true } : {}; // the AI pays and resolves its effects itself
+  // the AI always plays in auto mode; a human starts in auto mode unless their client asked otherwise
+  r.state.auto = { ...(r.humanAuto || {}), ...(r.ai ? { [r.ai.seat]: true } : {}) };
   const err = game.apply(r.state, { type: 'start', decks: r.decks, cards, caller: r.ai ? other(r.ai.seat) : null });
   if (err) throw new Error(err);
   broadcast(r);
@@ -234,6 +235,7 @@ http.createServer(async (req, res) => {
       const name = String(a.name || '').slice(0, 24) || 'Joueur 1';
       const r = makeRoom(a.mode === 'ai' ? 'ai' : 'pvp');
       r.state.seats.p1 = { name };
+      r.humanAuto = { p1: a.auto !== false };
       r.decks.p1 = d1;
       if (r.mode === 'pvp') { broadcast(r); return json(res, 200, { tag: r.tag, seat: 'p1' }); }
       const d2 = deckById(a.deckId2) || d1;
@@ -252,6 +254,7 @@ http.createServer(async (req, res) => {
       const d = deckById(a.deckId);
       if (!d) return json(res, 400, { error: 'Choisissez un deck' });
       r.state.seats.p2 = { name: String(a.name || '').slice(0, 24) || 'Joueur 2' };
+      r.humanAuto = { ...(r.humanAuto || {}), p2: a.auto !== false };
       r.decks.p2 = d;
       await startRoom(r);
       return json(res, 200, { tag: r.tag, seat: 'p2' });

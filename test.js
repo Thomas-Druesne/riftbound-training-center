@@ -412,6 +412,15 @@ assert.equal(s.bfs[1].ctrl, 'p2', 'undo restores the combat');
     assert.equal(g.apply(t, { type: 'chainPass', seat: 'p1' }), null);
     assert.equal(g.apply(t, { type: 'chainResolve', seat: 'p2' }), null);
     assert.ok(!t.chain.length);
+    // Rengar, Trophy Hunter enters a battlefield where only the enemy has units; others can't
+    const rg = get('Rengar, Trophy Hunter');
+    t.cd[rg.id] = rg; t.active = 'p1'; t.auto = { p1: true, p2: true }; t.chain = []; t.showdown = null; t.pending = null; t.fxQueue = [];
+    t.players.p1.pool = { e: 20, p: ['any', 'any', 'any'] };
+    t.bfs[1].units.p1 = []; t.bfs[1].units.p2 = [mkc('e9', 'U', 'p2')]; t.bfs[1].ctrl = 'p2';
+    t.players.p1.zones.hand.push(mkc('rg', 'Rengar, Trophy Hunter', 'p1'), mkc('u9', 'U', 'p1'));
+    assert.ok(g.apply(t, { type: 'play', seat: 'p1', iid: 'u9', to: { bf: 1 } }), 'a normal unit cannot');
+    assert.equal(g.apply(t, { type: 'play', seat: 'p1', iid: 'rg', to: { bf: 1 } }), null, 'Rengar can');
+    assert.ok(t.bfs[1].units.p1.some(c => c.iid === 'rg') && t.showdown && t.showdown.att === 'p1', 'he attacks there');
   }
 }
 console.log('reducer OK');

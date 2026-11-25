@@ -447,6 +447,17 @@ function phaseMain(s, me, level) {
   if (x.ability != null) return [{ type: 'activate', iid: x.c.iid, k: x.ability, targets: x.plan.targets, ...(x.plan.bf != null ? { bf: x.plan.bf } : {}) }];
   const act = { type: 'play', iid: x.c.iid, targets: x.plan.targets };
   if (x.plan.bf != null) act.bf = x.plan.bf;
+  if (x.d.type === 'Unit' && R.kw(x.d.text).toEnemyBf) {
+    const m = model(s, me);
+    let best = null;
+    s.bfs.forEach((b, i) => {
+      if (!b.units[op].length || b.units[me].length) return;
+      const t = clone(m); t.bfs[i].u[me].push(unitOf(s, x.c, me));
+      const v = fightValue(t, i, me, me);
+      if (v > 2 && (!best || v > best.v)) best = { v, i };
+    });
+    if (best) act.to = { bf: best.i };
+  }
   if (x.d.type === 'Unit' && x.cost !== FREE && R.kw(x.d.text).accelerate) act.accel = afford(s, me, [{ ...x.d, energy: (x.d.energy || 0) + 1, power: (x.d.power || 0) + 1 }]);
   return [act];
 }
@@ -578,7 +589,8 @@ function combatTrick(s, me, level, reactionOnly) {
   const opts = [];
   for (const { c, d, hidBf } of quickCards(s, me, reactionOnly)) {
     if (d.type === 'Unit') { // Ambush (where I already have units) or a hidden unit at this battlefield: reinforce
-      if (hidBf != null ? hidBf !== i : !R.kw(d.text).ambush || !s.bfs[i].units[me].length) continue;
+      const kd = R.kw(d.text);
+      if (hidBf != null ? hidBf !== i : !kd.ambush || !(s.bfs[i].units[me].length || (kd.toEnemyBf && s.bfs[i].units[op].length))) continue;
       const t = clone(m); t.bfs[i].u[me].push(unitOf(s, c, me));
       opts.push({ v: fightValue(t, i, sd.att, me), act: hidBf != null ? { type: 'play', iid: c.iid } : { type: 'play', iid: c.iid, to: { bf: i } } });
       continue;

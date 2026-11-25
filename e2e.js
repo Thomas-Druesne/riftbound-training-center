@@ -70,12 +70,12 @@ async function game(i, decks) {
     }
     if (busy) continue;
     // manual chores at the start of my turn: ready, channel, draw
-    if (v.stage === 'main' && v.active === me && v.started === v.turn && choresTurn !== v.turn && !(v.chain || []).length && !v.showdown && !v.pending) {
+    if (v.stage === 'main' && v.active === me && !(v.auto || {})[me] && v.started === v.turn && choresTurn !== v.turn && !(v.chain || []).length && !v.showdown && !v.pending) {
       choresTurn = v.turn; busy = true;
       for (const a of [{ type: 'readyAll' }, { type: 'channel', n: 2 }, { type: 'draw', n: 1 }]) await post('/api/action', { room, seat: me, p: me, ...a });
       busy = false; continue;
     }
-    v._chores = choresTurn === v.turn;
+    v._chores = choresTurn === v.turn || !!(v.auto || {})[me];
     const a = human(v, me);
     if (!a) continue;
     busy = true;

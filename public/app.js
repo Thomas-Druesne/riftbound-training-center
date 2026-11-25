@@ -458,7 +458,7 @@ function onState(v) {
   }
   if (v.phase === 'lobby') { if (S.screen === 'lobby') renderLobby(); return; }
   if (S.seat === 'p1' || S.seat === 'p2') S.me = S.seat;
-  const wantAuto = !!store.get('auto', false);
+  const wantAuto = !!store.get('auto', true);
   if (v.phase === 'playing' && S.me && !!(v.auto || {})[S.me] !== wantAuto && S.autoSync !== S.room + wantAuto) {
     S.autoSync = S.room + wantAuto; send({ type: 'setAuto', on: wantAuto });
   }
@@ -513,7 +513,8 @@ async function renderLobby() {
   const create = async (mode, extra = {}) => {
     if (!myDeck.value) return toast('Choisissez votre deck');
     try {
-      const r = await api('/api/room/create', { body: { mode, name: S.name, deckId: myDeck.value, ...extra } });
+      store.set('auto', true); // every new game starts in auto mode (the switch at the top right turns it off)
+      const r = await api('/api/room/create', { body: { mode, name: S.name, deckId: myDeck.value, auto: true, ...extra } });
       connect(r.tag, r.seat); S.me = r.seat;
       if (mode === 'pvp') setTimeout(renderLobby, 150);
     } catch (e) { toast(e.message); }
@@ -536,7 +537,7 @@ async function renderLobby() {
         h('div', { class: 'pvp-or' }, 'ou'),
         h('div', { class: 'pvp-col' }, h('h4', {}, 'Rejoindre'), tagIn, h('button', { class: 'btn teal big', onclick: async () => {
           if (!myDeck.value) return toast('Choisissez votre deck');
-          try { const r = await api('/api/room/join', { body: { tag: tagIn.value, name: S.name, deckId: myDeck.value } }); connect(r.tag, r.seat); S.me = r.seat; }
+          try { const r = (store.set('auto', true), await api('/api/room/join', { body: { tag: tagIn.value, name: S.name, deckId: myDeck.value, auto: true } })); connect(r.tag, r.seat); S.me = r.seat; }
           catch (e) { toast(e.message); }
         } }, 'Rejoindre'))));
   }
@@ -1218,6 +1219,10 @@ function cardMenu(e, iid) {
     onBoard && mine && /\[Empower\]/.test(txt) ? [c.emp ? 'Retirer Empowered' : `Empower (${costLabel(txt, 'Empower')})`, () => send({ type: 'empower', iid })] : null,
     onBoard && mine && d && d.name === 'Gold' && d.supertype === 'Token' ? ['Utiliser le Gold (+1 puissance au choix)', () => send({ type: 'gold', iid })] : null,
     inHand && mine && d && ['Unit', 'Spell', 'Gear'].includes(d.type) ? [d.type === 'Spell' ? '✦ Lancer (sur la pile)' : '✦ Jouer', () => playCard(iid), 'P'] : null,
+    ...(inHand && mine && d && d.type === 'Unit' ? S.v.bfs.map((b, i) => i).filter(i => {
+      const b = S.v.bfs[i];
+      return b.ctrl === S.me || (/\[Ambush\]|can be played to a battlefield/i.test(txt) && b.units[S.me].length) || (/where there are enemy units/i.test(txt) && b.units[other(S.me)].length);
+    }).map(i => [`✦ Jouer sur ${bfName(i)}`, () => send({ type: 'play', iid, to: { bf: i } })]) : []),
     L.zone === 'chain' ? ['Contrer (vers la défausse)', () => mv(iid, { p: o, zone: 'trash', pos: 'top' })] : null,
     onBoard ? [c.ex ? 'Redresser' : 'Épuiser', () => send({ type: 'exhaust', iid }), 'Espace'] : null,
     L.zone === 'runes' ? ['Recycler la rune', () => send({ type: 'recycle', iid })] : null,

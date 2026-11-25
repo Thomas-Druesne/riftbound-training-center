@@ -113,11 +113,11 @@ function kill(s, f) {
 }
 const mineOnBoard = (s, p) => [...s.players[p].zones.base, ...s.players[p].zones.legend, ...s.bfs.flatMap(b => b.units[p])];
 // A unit's triggered ability: its effects are queued like play effects (choices become prompts).
-const EV = { attack: 'attaque', defend: 'défend', conquer: 'conquiert', hold: 'tient', move: 'se déplace', deathknell: 'Deathknell' };
+const EV = { attack: 'attaque', defend: 'défend', conquer: 'conquête', hold: 'tient', move: 'déplacement', deathknell: 'Deathknell', playSpell: 'sort joué', playUnit: 'unité jouée', allyDies: 'unité alliée détruite' };
 function trigger(s, c, ev, p, bf) {
   const d = cd(s, c), fx = R.triggerFx(d, ev);
   if (!fx.length) return;
-  log(s, `↳ ${d.name} ${ev === 'deathknell' ? ': Deathknell' : EV[ev]} : capacité déclenchée.`);
+  log(s, `↳ ${d.name} (${EV[ev] || ev}) : capacité déclenchée.`);
   (s.fxQueue || (s.fxQueue = [])).push(...fx.map(e => ({ ...e, by: p, card: d.name, src: c.iid, bfAt: bf })));
   if (!s.fxRun) runFx(s);
 }
@@ -840,8 +840,8 @@ function act(s, a, who) {
         const bf = s.bfs[toBf];
         if (!bf) return 'champ de bataille inconnu';
         if (fromHidden && toBf !== f.bf) return 'Une unité jouée depuis une carte cachée arrive sur ce champ de bataille.';
-        if (!fromHidden && bf.ctrl !== p && !(k.ambush && bf.units[p].length))
-          return k.ambush ? 'Embuscade : il faut contrôler ce champ de bataille ou y avoir déjà une unité.' : `${d.name} se joue dans votre base ou sur un champ de bataille que vous contrôlez (Embuscade/Ambush permet d’aller là où vous avez des unités).`;
+        if (!fromHidden && bf.ctrl !== p && !(k.ambush && bf.units[p].length) && !(k.toEnemyBf && bf.units[other(p)].length))
+          return k.toEnemyBf ? `${d.name} se joue sur un champ de bataille où il y a des unités ennemies, où vous avez des unités, ou que vous contrôlez.` : k.ambush ? 'Embuscade : il faut contrôler ce champ de bataille ou y avoir déjà une unité.' : `${d.name} se joue dans votre base ou sur un champ de bataille que vous contrôlez (Embuscade/Ambush permet d’aller là où vous avez des unités).`;
       }
       const pl = s.players[p], legion = (s.played && s.played[p]) > 0;
       let paid = null, accel = false, repeat = null;
