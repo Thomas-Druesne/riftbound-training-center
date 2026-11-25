@@ -537,5 +537,46 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     assert.equal(g.apply(s, { type: 'resolve', seat: P, iids: [top[0]] }), null);
     assert.equal(Z.main[Z.main.length - 1].iid, top[0], 'recycled to the bottom');
   }
+  { // Baron Nashor: 10 energy + 3 Chaos power from 12 runes (a rune exhausted for energy can then be recycled
+    // for power); it adds Baron Pit and enters there; enemy spells can't choose it
+    const s = mk(), P = s.active, Z = s.players[P].zones, rune = all.find(c => c.name === 'Chaos Rune');
+    s.cd[rune.id] = rune; for (const n of ['Baron Nashor', 'Baron Pit']) s.cd[by(n).id] = by(n);
+    s.auto = { p1: true, p2: true };
+    Z.runes = Array.from({ length: 12 }, (_, i) => ({ iid: 'cr' + i, cid: rune.id, owner: P, ex: false }));
+    Z.hand.push(card(s, 'baron', 'Baron Nashor', P));
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'baron' }), null, 'Baron is payable with 12 runes');
+    assert.equal(Z.runes.length, 9, '3 runes recycled');
+    assert.equal(s.bfs.length, 3); assert.equal(s.cd[s.bfs[2].card.cid].name, 'Baron Pit');
+    assert.equal(g.find(s, 'baron').bf, 2, 'Baron enters Baron Pit');
+    assert.ok(!g.candidates(s, other(P), { side: 'enemy', where: 'any' }).includes('baron'), 'not chosen by enemy spells');
+  }
+  { // battlefields: Zaun Warrens on conquer (discard 1, then draw 1), Ruined Monastery ("you may": yes / no),
+    // and only a reminder in the log in manual mode
+    const bfGame = (bfName, autoMode) => {
+      const s = mk(), P = s.active, Z = s.players[P].zones;
+      s.cd[by(bfName).id] = by(bfName); s.bfs[0].card.cid = by(bfName).id; s.auto = { p1: autoMode, p2: autoMode };
+      const u = Z.main.find(c => g.cd(s, c).type === 'Unit'); Z.main.splice(Z.main.indexOf(u), 1); u.ex = false; Z.base.push(u);
+      s.bfs[0].units.p1 = []; s.bfs[0].units.p2 = []; s.bfs[0].ctrl = null;
+      return { s, P, Z, u };
+    };
+    let { s, P, Z, u } = bfGame('Zaun Warrens', true);
+    const hand = Z.hand.length;
+    assert.equal(g.apply(s, { type: 'move', seat: P, iid: u.iid, to: { bf: 0, side: P } }), null);
+    assert.equal(s.pending && s.pending.kind, 'discard', 'Zaun Warrens: discard first');
+    assert.equal(g.apply(s, { type: 'resolve', seat: P, iids: [Z.hand[0].iid] }), null);
+    assert.equal(Z.hand.length, hand, 'then draw 1');
+    ({ s, P, Z, u } = bfGame('Ruined Monastery', true));
+    const runes = Z.runes.length;
+    g.apply(s, { type: 'move', seat: P, iid: u.iid, to: { bf: 0, side: P } });
+    assert.equal(s.pending && s.pending.kind, 'confirm', 'Ruined Monastery asks');
+    assert.equal(g.apply(s, { type: 'resolve', seat: P, yes: true }), null);
+    assert.equal(s.pending.kind, 'discard');
+    g.apply(s, { type: 'resolve', seat: P, iids: [Z.hand[0].iid] });
+    assert.equal(Z.runes.length, runes + 1); assert.ok(Z.runes[Z.runes.length - 1].ex, 'channeled exhausted');
+    ({ s, P, Z, u } = bfGame('Zaun Warrens', false));
+    g.apply(s, { type: 'move', seat: P, iid: u.iid, to: { bf: 0, side: P } });
+    g.apply(s, { type: 'conquer', seat: P, bf: 0 });
+    assert.ok(!s.pending && s.log.some(l => /Zaun Warrens \(conquête.*À appliquer à la main/.test(l.msg)), 'manual mode: written in the log');
+  }
 }
 console.log('self-check OK');

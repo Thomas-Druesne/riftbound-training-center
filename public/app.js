@@ -970,6 +970,20 @@ function renderPregame() {
 S.pick = new Set();
 function renderPrompt(P, v) {
   const q = v.pending, me = S.me, fx = q.fx || {};
+  if (q.kind === 'confirm') { // a battlefield's "you may": yes / no
+    const key = 'prompt|confirm|' + q.card + q.text;
+    if (P.dataset.key === key && P.classList.contains('show')) return;
+    P.dataset.key = key; P.innerHTML = '';
+    const bfc = v.bfs.map(b => b.card).find(c => c && cardOf(c) && cardOf(c).name === q.card), d = bfc && cardOf(bfc);
+    P.append(h('div', { class: 'pg' },
+      h('div', { class: 'pg-step' }, q.card), h('h2', {}, T(q.text)),
+      d ? h('div', { class: 'pg-cards' }, cardView(d)) : null,
+      h('div', { class: 'pg-actions' },
+        h('button', { class: 'btn big', onclick: () => send({ type: 'resolve', yes: false }) }, T('Non')),
+        h('button', { class: 'btn gold big', onclick: () => send({ type: 'resolve', yes: true }) }, T('Oui')))));
+    P.classList.add('show');
+    return;
+  }
   // what can be chosen, and how many: discard (hand), sacrifice / buff (own units), target (listed by the engine),
   // bf (battlefields), predict (top cards of your deck, any number to recycle)
   const myUnits = [...v.players[me].zones.base, ...v.bfs.flatMap(b => b.units[me])].filter(c => (cardOf(c) || {}).type === 'Unit');

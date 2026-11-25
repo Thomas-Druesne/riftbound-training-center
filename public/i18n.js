@@ -58,6 +58,12 @@ const EN = {
   'Mode': 'Mode', 'auto': 'auto', 'manuel': 'manual', 'Piocher': 'Draw', 'Canaliser': 'Channel', 'Redresser tout': 'Ready all', 'Fin de tour': 'End turn',
   'Passe la main. Le tour suivant démarre seul : unités et runes redressées, points de tenue, 2 runes canalisées, 1 carte piochée.':
     'Pass the turn. The next turn starts by itself: units and runes readied, hold points, 2 runes channeled, 1 card drawn.',
+  'Oui': 'Yes', 'Non': 'No', 'Défausser 1 carte et canaliser 1 rune épuisée ?': 'Discard 1 card and channel 1 rune exhausted?',
+  'Payer 1 énergie pour un jeton Gold épuisé ?': 'Pay 1 energy for an exhausted Gold token?', 'Payer 1 énergie pour redresser votre légende ?': 'Pay 1 energy to ready your legend?',
+  'Payer 1 énergie pour piocher 1 ?': 'Pay 1 energy to draw 1?', 'Dépenser un buff pour piocher 1 ?': 'Spend a buff to draw 1?', 'Payer 4 puissance pour marquer 1 point ?': 'Pay 4 power to score 1 point?',
+  'Canaliser 1 rune épuisée ?': 'Channel 1 rune exhausted?', 'Détruire une de vos unités ici pour piocher 1 ?': 'Kill one of your units here to draw 1?',
+  'conquête': 'conquer', 'tenir': 'hold', 'défense': 'defend', 'combat': 'combat', 'début de tour': 'beginning phase', 'premier tour': 'first turn', 'carte cachée': 'hidden card',
+  'Rockfall Path : aucune unité ne peut y être jouée.': 'Rockfall Path: units can’t be played here.',
   'Son': 'Sound', 'Options': 'Options', 'Force adverse ici': 'Enemy Might here', 'Votre force ici': 'Your Might here', 'Buff': 'Buff',
   // stack, prompts
   'champ de bataille': 'battlefield', ' (la vôtre)': ' (yours)', 'Son effet s’applique à la résolution.': 'Its effect applies on resolution.',
@@ -188,6 +194,15 @@ const EN_TPL = [
   ['{0} choisit {1}.', '{0} chooses {1}.'], ['{0} garde sa main.', '{0} keeps their hand.'], ['{0} : {1} point{2}{3}.', '{0}: {1} point{2}{3}.'],
   ['{0} : {1} sur {2} ce tour.', '{0}: {1} at {2} this turn.'], ['{0} crée {1} {2}{3}{4}.', '{0} creates {1} {2}{3}{4}.'],
   // interface
+  ['↳ {0} ({1}, {2}) : « {3} » À appliquer à la main.', '↳ {0} ({1}, {2}): “{3}” Apply it by hand.'], ['↳ {0} ({1}, {2}) : effet du champ de bataille.', '↳ {0} ({1}, {2}): battlefield ability.'],
+  ['{0} choisit d’utiliser ou non {1}.', '{0} chooses whether to use {1}.'], ['{0} utilise {1}.', '{0} uses {1}.'], ['{0} n’utilise pas {1}.', '{0} doesn’t use {1}.'],
+  ['{0} : {1} ne peut pas payer ({2}).', '{0}: {1} can’t pay ({2}).'], ['{0} recycle une rune ({1}).', '{0} recycles a rune ({1}).'],
+  ['{0} redressera {1} runes à la fin du tour ({2}).', '{0} will ready {1} runes at the end of the turn ({2}).'], ['{0} marque 1 point ({1}, total {2}).', '{0} scores 1 point ({1}, total {2}).'],
+  ['{0} reprend son champion choisi depuis sa défausse ({1}).', '{0} returns their chosen champion from the trash ({1}).'], ['🏆 {0} a {1} unités sur {2} et gagne la partie !', '🏆 {0} has {1} units at {2} and wins the game!'],
+  ['{0} révèle {1} : un sort, il va dans sa main ({2}).', '{0} reveals {1}: a spell, it goes to their hand ({2}).'], ['{0} révèle {1} et le recycle ({2}).', '{0} reveals {1} and recycles it ({2}).'],
+  ['{0} inflige {1} à chaque unité ici ({2}).', '{0} deals {1} to each unit here ({2}).'], ['{0} dépense le buff de {1} ({2}).', '{0} spends {1}’s buff ({2}).'],
+  ['{0} redresse {1} rune{2} (Targon\'s Peak).', '{0} readies {1} rune{2} (Targon\'s Peak).'], ['Aspirant\'s Climb : il faut {0} points pour gagner.', 'Aspirant\'s Climb: {0} points are needed to win.'],
+  ['{0} ajoute le champ de bataille Baron Pit et y entre.', '{0} adds the Baron Pit battlefield and enters there.'], ['Pas assez de runes ({0}).', 'Not enough runes ({0}).'],
   ['Tour de {0}', '{0}’s turn'], ['Tour {0}', 'Turn {0}'], ['Main · {0}', 'Hand · {0}'], ['Base · {0}', 'Base · {0}'], ['{0} réfléchit', '{0} is thinking'], ['({0})', '({0})'],
   ['{0} joue', '{0} plays'], ['Défausse · {0}', 'Trash · {0}'], ['Bannis · {0}', 'Banishment · {0}'], ['Deck · {0}', 'Deck · {0}'], ['Victoire de {0} !', '{0} wins!'], ['Votre choix est fait. {0} choisit le sien…', 'Your choice is made. {0} is choosing…'],
   ['Vous avez « {0} », {1} a « {2} ». Lancez le dé !', 'You have “{0}”, {1} has “{2}”. Roll the die!'], ['{0} a choisi « {1} », vous avez « {2} ».', '{0} chose “{1}”, you have “{2}”.'],

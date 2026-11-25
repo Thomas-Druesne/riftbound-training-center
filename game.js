@@ -59,6 +59,12 @@ function auraBonus(s, c, d) {
   }
   const b = f.bf != null && s.bfs[f.bf].card;
   if (b) for (const a of R.auras(cd(s, b))) if (a.who === 'any' && (!a.champion || d.supertype === 'Champion')) n += a.n;
+  if (b) {
+    const bn = cd(s, b).name, sd = s.showdown;
+    if (bn === 'Kinkou Temple' && (R.kw(d.text).tank || c.tt)) n += 1;
+    if (bn === 'Brush' && (d.tags || []).some(t => ['Bird', 'Cat', 'Dog', 'Poro', 'Ivern'].includes(t))) n += 1;
+    if (bn === 'Forbidding Waste' && sd && sd.bf === f.bf && sd.att !== f.p && s.bfs[f.bf].units[f.p].length === 1) n -= 2;
+  }
   return n;
 }
 const isToken = (s, c) => cd(s, c).supertype === 'Token';
@@ -77,6 +83,7 @@ function conquer(s, b, p) {
   const bf = s.bfs[b], pl = s.players[p], nm = bf.card ? name(s, bf.card) : 'un champ de bataille';
   bf.ctrl = p;
   for (const c of bf.units[p].slice()) trigger(s, c, 'conquer', p, b);
+  bfTrigger(s, b, 'conquer', p);
   const sc = scoredOf(s, p);
   if (sc.includes(b)) { log(s, `${seatName(s, p)} reprend ${nm} (déjà marqué ce tour : pas de point).`); return; }
   sc.push(b);
@@ -113,6 +120,30 @@ function kill(s, f) {
 }
 const mineOnBoard = (s, p) => [...s.players[p].zones.base, ...s.players[p].zones.legend, ...s.bfs.flatMap(b => b.units[p])];
 // A unit's triggered ability: its effects are queued like play effects (choices become prompts).
+const BF_EV = { conquer: 'conquête', hold: 'tenir', defend: 'défense', combat: 'combat', begin: 'début de tour', beginAll: 'début de tour', firstBegin: 'premier tour', hide: 'carte cachée' };
+const bfName = (s, b) => (s.bfs[b] && s.bfs[b].card ? cd(s, s.bfs[b].card).name : '');
+// A battlefield's ability: always written in the log; applied by the engine in auto mode, by hand otherwise.
+function bfTrigger(s, b, ev, p) {
+  const bf = s.bfs[b]; if (!bf || !bf.card) return;
+  const d = cd(s, bf.card), fx = (R.BF_FX[d.name] || {})[ev];
+  if (!fx || !fx.length) return;
+  if (!auto(s, p)) { log(s, `↳ ${d.name} (${BF_EV[ev]}, ${seatName(s, p)}) : « ${d.text} » À appliquer à la main.`); return; }
+  log(s, `↳ ${d.name} (${BF_EV[ev]}, ${seatName(s, p)}) : effet du champ de bataille.`);
+  (s.fxQueue || (s.fxQueue = [])).push(...fx.map(e => ({ ...e, by: p, card: d.name, src: bf.card.iid, bfAt: b })));
+  if (!s.fxRun) runFx(s);
+}
+// can player p use this optional ("you may") effect now?
+function mayCond(s, p, e) {
+  const here = e.bfAt != null && s.bfs[e.bfAt] ? s.bfs[e.bfAt].units[p].filter(c => cd(s, c).type === 'Unit') : [];
+  switch (e.cond) {
+    case 'hand': return s.players[p].zones.hand.length > 0;
+    case 'runes<=4': return runesOf(s, p).length <= 4;
+    case 'mightyHere': return here.some(c => hp(s, c) >= 5);
+    case 'buffed': return unitsOf(s, p).some(c => c.buff > 0);
+    case 'unitsHere': return here.length > 0;
+    default: return true;
+  }
+}
 const EV = { attack: 'attaque', defend: 'défend', conquer: 'conquête', hold: 'tient', move: 'déplacement', deathknell: 'à sa mort (Deathknell)', playSpell: 'sort joué', playUnit: 'unité jouée', allyDies: 'unité alliée détruite' };
 function trigger(s, c, ev, p, bf) {
   const d = cd(s, c), fx = R.triggerFx(d, ev);
@@ -164,6 +195,8 @@ function openShowdown(s, b, att) {
   log(s, `⚔ Affrontement sur ${bf.card ? name(s, bf.card) : 'le champ de bataille'} : ${seatName(s, att)} attaque. Chacun peut jouer des cartes [Action]/[Reaction], puis passer.`);
   for (const c of bf.units[att].slice()) trigger(s, c, 'attack', att, b);
   for (const c of bf.units[other(att)].slice()) trigger(s, c, 'defend', other(att), b);
+  bfTrigger(s, b, 'defend', other(att));
+  bfTrigger(s, b, 'combat', att);
 }
 function closeShowdown(s) {
   const sd = s.showdown; s.showdown = null;
@@ -212,7 +245,7 @@ function runFx(s) {
 function runFxLoop(s) {
   while (s.fxQueue && s.fxQueue.length && !s.pending) {
     const e = s.fxQueue.shift(), to = e.who === 'self' ? e.by : other(e.by), T = seatName(s, to);
-    if (e.kind === 'draw') { const n = draw(s, to, e.n + (e.per === 'bfCtrl' ? s.bfs.filter(b => b.ctrl === to).length : e.per === 'mighty' ? unitsOf(s, to).filter(c => hp(s, c) >= 5).length : 0)); log(s, `${T} pioche ${n} (${e.card}).`); }
+    if (e.kind === 'draw') { const n = draw(s, to, e.n + (e.per === 'bfCtrl' || e.per === 'bfCtrlOther' ? s.bfs.filter((b, i) => b.ctrl === to && !(e.per === 'bfCtrlOther' && i === e.bfAt)).length : e.per === 'mighty' ? unitsOf(s, to).filter(c => hp(s, c) >= 5).length : 0)); log(s, `${T} pioche ${n} (${e.card}).`); }
     else if (e.kind === 'reveal') { for (const c of s.players[to].zones.hand) c.rev = true; log(s, `${T} révèle sa main (${e.card}).`); }
     else if (e.kind === 'token') makeTokens(s, to, e, e.here ? e.bfAt : null, e.card);
     else if (e.kind === 'counter') { // counter the spell just below on the stack
@@ -286,6 +319,46 @@ function runFxLoop(s) {
     else if (e.kind === 'channel') { const z = s.players[to].zones, k = channel(s, to, e.n); if (e.ex) z.runes.slice(-k).forEach(r => (r.ex = true)); log(s, `${T} canalise ${k} rune${k > 1 ? 's' : ''}${e.ex ? ' épuisée' + (k > 1 ? 's' : '') : ''} (${e.card}).`); }
     else if (e.kind === 'xp') { s.players[to].xp = (s.players[to].xp || 0) + e.n; log(s, `${T} gagne ${e.n} XP (${e.card}).`); }
     else if (e.kind === 'burn') { const k = burn(s, to, e.n); log(s, `${T} brûle ${k} carte${k > 1 ? 's' : ''} du dessus de son deck (${e.card}).`); }
+    else if (e.kind === 'may') {
+      if (!mayCond(s, to, e)) continue;
+      if (e.pay && !R.planCost(runesOf(s, to), s.players[to].pool || newPool(), e.pay)) { log(s, `${e.card} : ${T} ne peut pas payer (${costText(e.pay)}).`); continue; }
+      s.pending = { kind: 'confirm', to, n: 0, by: e.by, card: e.card, text: e.text, fx: e, ai: e.ai !== false };
+      log(s, `${T} choisit d’utiliser ou non ${e.card}.`);
+    }
+    else if (e.kind === 'recycleRune') {
+      const z = s.players[to].zones; if (!z.runes.length) continue;
+      const [r] = z.runes.splice(Math.max(0, z.runes.findIndex(x => x.ex)), 1); r.ex = false; z.runeDeck.push(r);
+      log(s, `${T} recycle une rune (${e.card}).`);
+    }
+    else if (e.kind === 'readyRunesEnd') { const er = s.endReady || (s.endReady = {}); er[to] = (er[to] || 0) + e.n; log(s, `${T} redressera ${e.n} runes à la fin du tour (${e.card}).`); }
+    else if (e.kind === 'scorePt') {
+      if (e.cond === 'runeDeckEmpty' && s.players[to].zones.runeDeck.length) continue;
+      s.players[to].score++; log(s, `${T} marque 1 point (${e.card}, total ${s.players[to].score}).`); winCheck(s, to);
+    }
+    else if (e.kind === 'champBack') {
+      const z = s.players[to].zones, i = z.trash.findIndex(c => c.cid === s.players[to].champCid);
+      if (z.champion.length || i < 0) continue;
+      z.champion.push(...z.trash.splice(i, 1)); log(s, `${T} reprend son champion choisi depuis sa défausse (${e.card}).`);
+    }
+    else if (e.kind === 'unitsConquer') { for (const c of (s.bfs[e.bfAt] ? s.bfs[e.bfAt].units[to] : []).slice()) trigger(s, c, 'conquer', to, e.bfAt); }
+    else if (e.kind === 'winIf') {
+      const n = s.bfs[e.bfAt].units[to].filter(c => cd(s, c).type === 'Unit').length;
+      if (n >= e.units && !s.winner) { s.winner = to; log(s, `🏆 ${T} a ${n} unités sur ${e.card} et gagne la partie !`); }
+    }
+    else if (e.kind === 'ravenbloom') {
+      const z = s.players[to].zones, c = z.main.shift(); if (!c) continue;
+      if (cd(s, c).type === 'Spell') { z.hand.push(c); log(s, `${T} révèle ${name(s, c)} : un sort, il va dans sa main (${e.card}).`); }
+      else { z.main.push(c); log(s, `${T} révèle ${name(s, c)} et le recycle (${e.card}).`); }
+    }
+    else if (e.kind === 'aoeHere') {
+      const b = s.bfs[e.bfAt], us = SEATS.flatMap(q => b.units[q]).filter(c => cd(s, c).type === 'Unit');
+      if (!us.length) continue;
+      for (const c of us) c.dmg = (c.dmg || 0) + e.n;
+      log(s, `${e.card} inflige ${e.n} à chaque unité ici (${us.length}).`);
+      for (const c of us) if (c.dmg >= lethal(s, c)) { const f = find(s, c.iid); if (f) kill(s, f); }
+      syncCtrl(s);
+    }
+    else if (e.kind === 'spendBuff') { const c = unitsOf(s, to).find(x => x.buff > 0); if (!c) continue; c.buff = 0; log(s, `${T} dépense le buff de ${name(s, c)} (${e.card}).`); }
     else if (e.kind === 'predict') {
       const top = s.players[to].zones.main.slice(0, e.n);
       if (!top.length) continue;
@@ -294,7 +367,7 @@ function runFxLoop(s) {
     }
     else if (e.kind === 'buff') {
       if (e.me) { const f = e.src && find(s, e.src); if (f) buff(s, f.c); continue; }
-      const units = unitsOf(s, to).filter(c => !(e.other && c.iid === e.src));
+      const units = unitsOf(s, to).filter(c => !(e.other && c.iid === e.src) && !(e.here && !(s.bfs[e.bfAt] && s.bfs[e.bfAt].units[to].includes(c))));
       if (!units.length) continue;
       if (units.length === 1) { buff(s, units[0]); continue; }
       s.pending = { kind: 'buff', to, n: 1, by: e.by, card: e.card, exclude: e.other ? e.src : null };
@@ -324,6 +397,7 @@ function candidates(s, p, e) {
     if (c.fd || (e.gear ? d.type !== 'Gear' : d.type !== 'Unit')) return;
     if (e.side === 'enemy' && ctrl === p) return;
     if (e.side === 'friendly' && ctrl !== p) return;
+    if (ctrl !== p && /can't be chosen by enemy spells and abilities/i.test(d.text || '')) return;
     if (e.notSelf && c.iid === e.src) return;
     if (e.self && c.iid !== e.src) return;
     if (e.tag && !(d.tags || []).includes(e.tag)) return;
@@ -580,6 +654,7 @@ function setup(s, a) {
     };
     add(d.cards.legend, 'legend');
     add(d.cards.champion, 'champion');
+    pl.champCid = ((d.cards.champion || [])[0] || {}).id;
     add(d.cards.main, 'main');
     add(d.cards.runes, 'runeDeck');
     shuffle(pl.zones.main);
@@ -609,6 +684,7 @@ function afterBfPick(s) {
   if (!s.bfPick.p1 || !s.bfPick.p2) return;
   s.bfs = SEATS.map(p => ({ card: s.bfPick[p] === 'none' ? null : mk(s, s.bfPick[p], p), units: { p1: [], p2: [] }, ctrl: null, hidden: [] }));
   for (const p of SEATS) if (s.bfs[SEATS.indexOf(p)].card) log(s, `${seatName(s, p)} choisit ${name(s, s.bfs[SEATS.indexOf(p)].card)}.`);
+  if (s.bfs.some((b, i) => bfName(s, i) === "Aspirant's Climb")) { s.winScore++; log(s, `Aspirant's Climb : il faut ${s.winScore} points pour gagner.`); }
   s.stage = 'dice';
   log(s, `Qui commence ? ${seatName(s, s.dice.caller)} choisit pair ou impair.`);
 }
@@ -620,13 +696,19 @@ function startTurn(s, p) {
   s.scored = { p1: [], p2: [] }; // each battlefield scores once per player per turn
   s.played = { p1: 0, p2: 0 };   // cards played this turn ([Legion])
   s.sdDone = [];
+  s.bfs.forEach((b, i) => {
+    bfTrigger(s, i, 'beginAll', p);
+    if (b.units[p].length) bfTrigger(s, i, 'begin', p);
+    if (!s.players[p].begun) bfTrigger(s, i, 'firstBegin', p);
+  });
+  s.players[p].begun = true;
   if (!auto(s, p)) { // manual mode: the player readies, scores holds, channels and draws by hand
     const second = s.turn <= 2 && p !== s.first && !s.players[p].channeledBonus;
     if (second) s.players[p].channeledBonus = true;
     const held = s.bfs.filter(b => b.ctrl === p).length;
     log(s, `— Tour ${s.turn} · ${W} : à vous de redresser, ${held ? `marquer ${held} point${held > 1 ? 's' : ''} (tenir), ` : ''}canaliser ${second ? 3 : 2} runes et piocher 1 carte.`);
     s.started = s.turn;
-    s.bfs.forEach((b, i) => { if (b.ctrl === p) for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); });
+    s.bfs.forEach((b, i) => { if (b.ctrl === p) { for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); bfTrigger(s, i, 'hold', p); } });
     return;
   }
   readyAll(s, p);
@@ -643,7 +725,7 @@ function startTurn(s, p) {
   const d = auto(s, p) ? draw(s, p, 1) : 0; // a human draws by hand (click the deck)
   log(s, `— Tour ${s.turn} · ${W} : réveil, ${held ? `+${held} point${held > 1 ? 's' : ''} (tenir), ` : ''}canalise ${ch}, ${auto(s, p) ? `pioche ${d}` : "à vous de piocher (cliquez sur votre deck)"}.`);
   s.started = s.turn;
-  s.bfs.forEach((b, i) => { if (b.ctrl === p) for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); });
+  s.bfs.forEach((b, i) => { if (b.ctrl === p) { for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); bfTrigger(s, i, 'hold', p); } });
   winCheck(s, p);
 }
 
@@ -797,7 +879,8 @@ function act(s, a, who) {
         const why = f.p !== who ? 'ce n’est pas votre unité'
           : s.active !== who ? 'les déplacements se font pendant votre tour'
           : c.ex ? `${name(s, c)} est épuisé (un déplacement épuise l’unité, il faut qu’elle soit redressée)`
-          : f.zone === 'bf' && toZone === 'bf' && !R.kw(cd(s, c).text).ganking ? `${name(s, c)} ne peut pas aller d’un champ de bataille à un autre sans [Ganking]`
+          : f.zone === 'bf' && toZone === 'bf' && !R.kw(cd(s, c).text).ganking && bfName(s, a.to.bf) !== 'Baron Pit' && bfName(s, f.bf) !== 'Windswept Hillock' ? `${name(s, c)} ne peut pas aller d’un champ de bataille à un autre sans [Ganking]`
+          : f.zone === 'bf' && toZone === 'base' && bfName(s, f.bf) === "Vilemaw's Lair" ? 'Vilemaw’s Lair : les unités ne peuvent pas en revenir à la base'
           : null;
         const sd = s.showdown;
         const why2 = why || (sd && !(sd.fresh && sd.att === who && toZone === 'bf' && a.to.bf === sd.bf) ? 'un affrontement est en cours (passez ou résolvez-le d’abord)' : null);
@@ -844,7 +927,7 @@ function act(s, a, who) {
       // timing (rules 155, 806, 813): on the opponent's turn only [Reaction] / [Action] cards,
       // cards played from hiding (they gain Reaction), or Ambush units played to a battlefield where you have units.
       // During a showdown only Action / Reaction cards; on a pending stack only Reactions.
-      const toBf = a.to && a.to.bf != null ? a.to.bf : fromHidden ? f.bf : null;
+      let toBf = a.to && a.to.bf != null ? a.to.bf : fromHidden ? f.bf : null;
       const quick = k.reaction || fromHidden || (k.ambush && toBf != null && d.type === 'Unit');
       if (who !== s.active && !(quick || k.action))
         return `Ce n’est pas votre tour : seules les cartes [Reaction] ou [Action] se jouent pendant le tour adverse.`;
@@ -855,6 +938,7 @@ function act(s, a, who) {
       if (toBf != null && d.type === 'Unit') {
         const bf = s.bfs[toBf];
         if (!bf) return 'champ de bataille inconnu';
+        if (bfName(s, toBf) === 'Rockfall Path') return 'Rockfall Path : aucune unité ne peut y être jouée.';
         if (fromHidden && toBf !== f.bf) return 'Une unité jouée depuis une carte cachée arrive sur ce champ de bataille.';
         if (!fromHidden && bf.ctrl !== p && !(k.ambush && bf.units[p].length) && !(k.toEnemyBf && bf.units[other(p)].length))
           return k.toEnemyBf ? `${d.name} se joue sur un champ de bataille où il y a des unités ennemies, où vous avez des unités, ou que vous contrôlez.` : k.ambush ? 'Embuscade : il faut contrôler ce champ de bataille ou y avoir déjà une unité.' : `${d.name} se joue dans votre base ou sur un champ de bataille que vous contrôlez (Embuscade/Ambush permet d’aller là où vous avez des unités).`;
@@ -893,6 +977,11 @@ function act(s, a, who) {
         return null;
       }
       // units enter exhausted unless Accelerate was paid or the card says "I enter ready"; gear enters ready at base
+      // Baron Nashor: "As you play me, add the Baron Pit battlefield token to the board if it's not there already. If you do, I enter there."
+      if (d.type === 'Unit' && /add the Baron Pit battlefield token/i.test(d.text || '') && !s.bfs.some((b, i) => bfName(s, i) === 'Baron Pit')) {
+        const pit = Object.keys(s.cd).find(id => s.cd[id].name === 'Baron Pit' && s.cd[id].type === 'Battlefield');
+        if (pit) { s.bfs.push({ card: mk(s, pit, p), units: { p1: [], p2: [] }, ctrl: null, hidden: [] }); toBf = s.bfs.length - 1; log(s, `${d.name} ajoute le champ de bataille Baron Pit et y entre.`); }
+      }
       c.ex = d.type === 'Unit' ? !(accel || R.entersReady(d)) : false;
       (toBf != null && d.type === 'Unit' ? s.bfs[toBf].units[p] : pl.zones.base).push(c);
       log(s, `✦ ${seatName(s, p)} joue ${d.name}${how}.`);
@@ -961,6 +1050,7 @@ function act(s, a, who) {
       Object.assign(f.c, { fd: true, ex: false, hidT: s.turn, owner: f.c.owner });
       bf.hidden.push(f.c);
       log(s, `${W} cache une carte face cachée sur ${bf.card ? name(s, bf.card) : 'un champ de bataille'} (jouable gratuitement dès le tour suivant).`);
+      bfTrigger(s, a.bf, 'hide', who);
       return null;
     }
     case 'equip': { // [Equip] cost: attach an Equipment you control to a unit you control
@@ -1021,6 +1111,15 @@ function act(s, a, who) {
       if (!q) return 'Rien à résoudre';
       if (who !== q.to) return `C’est à ${seatName(s, q.to)} de choisir`;
       const ids = [...new Set(a.iids || [])];
+      if (q.kind === 'confirm') {
+        const e = q.fx;
+        if (a.yes && e.pay && !pay(s, q.to, e.pay)) return `Pas assez de runes (${costText(e.pay)}).`;
+        s.pending = null;
+        log(s, `${seatName(s, q.to)} ${a.yes ? 'utilise' : 'n’utilise pas'} ${q.card}.`);
+        if (a.yes) s.fxQueue = [...e.fx.map(x => ({ ...x, by: e.by, card: e.card, src: e.src, bfAt: e.bfAt })), ...(s.fxQueue || [])];
+        runFx(s);
+        return null;
+      }
       if (q.kind === 'predict') {
         if (ids.some(id => !q.cards.includes(id))) return 'Carte introuvable';
         const z = s.players[q.to].zones;
@@ -1196,6 +1295,8 @@ function act(s, a, who) {
       if (auto(s, s.active)) s.bfs.forEach((b, i) => { if (b.units.p1.some(c => cd(s, c).type === 'Unit') && b.units.p2.some(c => cd(s, c).type === 'Unit')) act(s, { type: 'fight', bf: i, att: s.active }, s.active); });
       for (const c of [...s.bfs.flatMap(b => [...b.units.p1, ...b.units.p2]), ...s.players.p1.zones.base, ...s.players.p2.zones.base]) { c.dmg = 0; c.tb = 0; c.ta = 0; c.ts = 0; c.tt = false; c.st = false; }
       for (const p of SEATS) for (const c of s.players[p].zones.hand) c.rev = false;
+      const er = s.endReady && s.endReady[s.active];
+      if (er) { let k = 0; for (const r of s.players[s.active].zones.runes) if (r.ex && k < er) { r.ex = false; k++; } delete s.endReady[s.active]; log(s, `${seatName(s, s.active)} redresse ${k} rune${k > 1 ? 's' : ''} (Targon's Peak).`); }
       for (const p of SEATS) s.players[p].pool = newPool(); // unspent energy/power is lost
       s.active = other(s.active);
       s.turn++;

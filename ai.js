@@ -503,6 +503,7 @@ function pregame(s, me, level) {
 // Answer a prompt aimed at the AI: discard the least useful cards / lose the weakest unit.
 function answer(s, me, level) {
   const q = s.pending;
+  if (q.kind === 'confirm') return { type: 'resolve', yes: q.ai !== false }; // battlefield "you may": take it
   if (q.kind === 'discard') {
     const runes = s.players[me].zones.runes.length;
     const worth = c => {

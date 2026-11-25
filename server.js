@@ -180,7 +180,7 @@ function aiNext(r, peek) {
     console.error('AI error:', e);
     r.ai.mem = {};
     const top = s.chain && s.chain[s.chain.length - 1];
-    if (s.pending) return s.pending.to === me ? (s.pending.kind === 'bf' ? { type: 'resolve', bf: s.pending.opts[0] } : { type: 'resolve', iids: s.pending.opt ? [] : (s.pending.opts || []).slice(0, s.pending.n) }) : null;
+    if (s.pending) return s.pending.to === me ? (s.pending.kind === 'confirm' ? { type: 'resolve', yes: false } : s.pending.kind === 'bf' ? { type: 'resolve', bf: s.pending.opts[0] } : { type: 'resolve', iids: s.pending.opt ? [] : (s.pending.opts || []).slice(0, s.pending.n) }) : null;
     if (top) return top.cb.by !== me ? (top.cb.seen ? null : { type: 'chainPass' }) : top.cb.seen ? { type: 'chainResolve' } : null;
     if (s.showdown) return s.showdown.focus === me ? { type: 'pass' } : null;
     return s.active === me && s.stage === 'main' ? { type: 'endTurn' } : null;

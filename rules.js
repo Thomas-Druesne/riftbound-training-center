@@ -279,11 +279,12 @@ function planCost(runes, pool, cost) {
   }
   let needE = cost.e;
   const usedE = Math.min(pool ? pool.e : 0, needE); needE -= usedE;
-  const left = runes.filter(r => !r.ex && !rc.includes(r.iid));
+  // a rune recycled for power can first be exhausted for energy (exhaust, then recycle)
+  const left = runes.filter(r => !r.ex);
   if (left.length < needE) return null;
-  // keep runes that could still produce useful power for later: spend the most common domain first
+  // runes being recycled anyway first, then the most common domain (keep the rare ones for later power)
   const cnt = {}; for (const r of left) cnt[r.dom] = (cnt[r.dom] || 0) + 1;
-  left.sort((a, b) => cnt[b.dom] - cnt[a.dom]);
+  left.sort((a, b) => rc.includes(b.iid) - rc.includes(a.iid) || cnt[b.dom] - cnt[a.dom]);
   return { ex: left.slice(0, needE).map(r => r.iid), rc, usedE, usedP };
 }
 // legacy helper used by the AI: plan a card's printed cost (+ extra energy/power of its domains) from runes only
@@ -391,4 +392,46 @@ function auras(card) {
   auraCache.set(t, out);
   return out;
 }
-module.exports = { abilities, auras, triggerFx, CARD_FX, parseCost, kwCost, cardCost, sumCost, planCost, tokensIn, deathTokens, SYNTH_TOKENS, kw, spellFx, planPay, combat, domOf, playFx, entersReady };
+// Battlefield abilities, by event: conquer / hold (the player who conquers or holds), defend (the defender),
+// combat (the attacker), begin (start of the turn of a player with units here), beginAll (start of every turn),
+// firstBegin (each player's first turn), hide (a card hidden here). 'may': optional, asked to the player
+// (cond: when it can be used, pay: its cost, ai: false = the AI declines).
+const SELF = o => ({ who: 'self', ...o });
+const MAY = (text, fx, o = {}) => SELF({ kind: 'may', text, fx, ...o });
+const BF_FX = {
+  'Zaun Warrens': { conquer: [SELF({ kind: 'discard', n: 1 }), SELF({ kind: 'draw', n: 1 })] },
+  'Seat of Power': { conquer: [SELF({ kind: 'draw', n: 0, per: 'bfCtrlOther' })] },
+  'Sigil of the Storm': { conquer: [SELF({ kind: 'recycleRune' })] },
+  'Minefield': { conquer: [SELF({ kind: 'burn', n: 2 })] },
+  'Ruined Monastery': { conquer: [MAY('Défausser 1 carte et canaliser 1 rune épuisée ?', [SELF({ kind: 'discard', n: 1 }), SELF({ kind: 'channel', n: 1, ex: true })], { cond: 'hand' })] },
+  "Targon's Peak": { conquer: [SELF({ kind: 'readyRunesEnd', n: 2 })] },
+  'Treasure Hoard': { conquer: [MAY('Payer 1 énergie pour un jeton Gold épuisé ?', [SELF({ kind: 'token', name: 'Gold', n: 1, ex: true })], { pay: { e: 1, p: [] } })] },
+  'Hall of Legends': { conquer: [MAY('Payer 1 énergie pour redresser votre légende ?', [SELF({ kind: 'readyLegend' })], { pay: { e: 1, p: [] } })] },
+  'Protective Sands': { conquer: [MAY('Payer 1 énergie pour piocher 1 ?', [SELF({ kind: 'draw', n: 1 })], { pay: { e: 1, p: [] }, cond: 'runes<=4' })] },
+  'Sunken Temple': { conquer: [MAY('Payer 1 énergie pour piocher 1 ?', [SELF({ kind: 'draw', n: 1 })], { pay: { e: 1, p: [] }, cond: 'mightyHere' })] },
+  'Monastery of Hirana': { conquer: [MAY('Dépenser un buff pour piocher 1 ?', [SELF({ kind: 'spendBuff' }), SELF({ kind: 'draw', n: 1 })], { cond: 'buffed' })] },
+  'The Candlelit Sanctum': { conquer: [SELF({ kind: 'predict', n: 2 })] },
+  'Altar to Unity': { hold: [SELF({ kind: 'token', name: 'Recruit', n: 1 })] },
+  'Amateur Recital': { hold: [T('recall', { where: 'bf', opt: true })] },
+  'Cosmic Vista': { hold: [SELF({ kind: 'scorePt', cond: 'runeDeckEmpty' })] },
+  'Grove of the God-Willow': { hold: [SELF({ kind: 'draw', n: 1 })] },
+  'Hallowed Tomb': { hold: [SELF({ kind: 'champBack' })] },
+  'Navori Fighting Pit': { hold: [SELF({ kind: 'buff', here: true })] },
+  'Power Nexus': { hold: [MAY('Payer 4 puissance pour marquer 1 point ?', [SELF({ kind: 'scorePt' })], { pay: { e: 0, p: [null, null, null, null] } })] },
+  "Reckoner's Arena": { hold: [SELF({ kind: 'unitsConquer' })] },
+  'Shadow Temple': { hold: [SELF({ kind: 'burn', n: 3 })] },
+  'Startipped Peak': { hold: [MAY('Canaliser 1 rune épuisée ?', [SELF({ kind: 'channel', n: 1, ex: true })])] },
+  'The Papertree': { hold: [SELF({ kind: 'channel', n: 1, ex: true }), { who: 'opp', kind: 'channel', n: 1, ex: true }] },
+  'The Grand Plaza': { hold: [SELF({ kind: 'winIf', units: 7 })] },
+  'Durand Memorial': { defend: [T('shield', { n: 0, tank: true, side: 'friendly', where: 'here' })] },
+  'Fortified Position': { defend: [T('shield', { n: 2, side: 'friendly', where: 'here' })] },
+  'Ravenbloom Conservatory': { defend: [SELF({ kind: 'ravenbloom' })] },
+  'Threshold of the Gray': { combat: [SELF({ kind: 'add', cost: { e: 1, p: [] } }), { who: 'opp', kind: 'add', cost: { e: 1, p: [] } }] },
+  'Frozen Fortress': { beginAll: [SELF({ kind: 'aoeHere', n: 1 })] },
+  'Dusk Rose Lab': { begin: [MAY('Détruire une de vos unités ici pour piocher 1 ?', [T('kill', { side: 'friendly', where: 'here' }), SELF({ kind: 'draw', n: 1 })], { cond: 'unitsHere', ai: false })] },
+  'Obelisk of Power': { firstBegin: [SELF({ kind: 'channel', n: 1 })] },
+  "The Arena's Greatest": { firstBegin: [SELF({ kind: 'scorePt' })] },
+  "Bandle Scouts' Academy": { hide: [SELF({ kind: 'token', name: 'Gold', n: 1, ex: true })] },
+};
+
+module.exports = { BF_FX, abilities, auras, triggerFx, CARD_FX, parseCost, kwCost, cardCost, sumCost, planCost, tokensIn, deathTokens, SYNTH_TOKENS, kw, spellFx, planPay, combat, domOf, playFx, entersReady };
