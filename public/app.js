@@ -504,7 +504,11 @@ async function renderLobby() {
       h('button', { class: 'btn', onclick: () => { send({ type: 'quit' }); connect(null, null); S.v = null; renderLobby(); } }, 'Annuler')));
     return;
   }
-  const deckOpts = (val, extra) => [extra, ...S.decks.map(d => h('option', { value: d.id, selected: d.id === val }, d.name))];
+  const RANDOM = '__random';
+  const deckOpts = (val, extra) => [extra, h('option', { value: RANDOM, selected: val === RANDOM }, '🎲 Aléatoire'), ...S.decks.map(d => h('option', { value: d.id, selected: d.id === val }, d.name))];
+  // '🎲 Aléatoire': a deck drawn at random when the game is created
+  const pickDeck = v => { if (v !== RANDOM) return v; const d = S.decks[Math.floor(Math.random() * S.decks.length)]; return d && d.id; };
+  const deckName = id => (S.decks.find(d => d.id === id) || {}).name;
   const myDeck = h('select', {}, deckOpts(store.get('deck', ''), h('option', { value: '' }, '— Votre deck —')));
   const nameIn = h('input', { placeholder: 'Votre nom', value: S.name, oninput: e => { S.name = e.target.value; store.set('name', S.name); } });
   myDeck.onchange = () => store.set('deck', myDeck.value);
@@ -514,7 +518,12 @@ async function renderLobby() {
     if (!myDeck.value) return toast('Choisissez votre deck');
     try {
       store.set('auto', true); // every new game starts in auto mode (the switch at the top right turns it off)
-      const r = await api('/api/room/create', { body: { mode, name: S.name, deckId: myDeck.value, auto: true, ...extra } });
+      const mine = pickDeck(myDeck.value);
+      if (extra.deckId2) extra = { ...extra, deckId2: pickDeck(extra.deckId2) };
+      const drawn = [myDeck.value === RANDOM && `vous : ${deckName(mine)}`, extra.drawnAi && `IA : ${deckName(extra.deckId2)}`].filter(Boolean);
+      if (drawn.length) toast('🎲 Deck tiré au sort — ' + drawn.join(' · '));
+      delete extra.drawnAi;
+      const r = await api('/api/room/create', { body: { mode, name: S.name, deckId: mine, auto: true, ...extra } });
       connect(r.tag, r.seat); S.me = r.seat;
       if (mode === 'pvp') setTimeout(renderLobby, 150);
     } catch (e) { toast(e.message); }
@@ -527,7 +536,7 @@ async function renderLobby() {
       h('div', { class: 'levels' }, LEVELS.map(([k, t, d]) => h('button', { class: 'lvl ' + k + (S.level === k ? ' on' : ''), onclick: e => { S.level = k; store.set('level', k); $$('.lvl').forEach(b => b.classList.toggle('on', b === e.currentTarget)); } },
         h('b', {}, t), h('span', {}, d)))),
       h('div', { class: 'form' }, h('label', {}, 'Votre deck', myDeck), h('label', {}, 'Deck de l’IA', aiDeck)),
-      h('button', { class: 'btn gold big', onclick: () => create('ai', { level: S.level, deckId2: aiDeck.value }) }, 'Lancer la partie'));
+      h('button', { class: 'btn gold big', onclick: () => create('ai', { level: S.level, deckId2: aiDeck.value, drawnAi: aiDeck.value === RANDOM }) }, 'Lancer la partie'));
   } else if (S.mode === 'pvp') {
     const tagIn = h('input', { placeholder: 'TAG', class: 'tag-in', maxlength: 10 });
     panel = h('div', { class: 'mode-panel' },
@@ -537,7 +546,7 @@ async function renderLobby() {
         h('div', { class: 'pvp-or' }, 'ou'),
         h('div', { class: 'pvp-col' }, h('h4', {}, 'Rejoindre'), tagIn, h('button', { class: 'btn teal big', onclick: async () => {
           if (!myDeck.value) return toast('Choisissez votre deck');
-          try { const r = (store.set('auto', true), await api('/api/room/join', { body: { tag: tagIn.value, name: S.name, deckId: myDeck.value, auto: true } })); connect(r.tag, r.seat); S.me = r.seat; }
+          try { const r = (store.set('auto', true), await api('/api/room/join', { body: { tag: tagIn.value, name: S.name, deckId: pickDeck(myDeck.value), auto: true } })); connect(r.tag, r.seat); S.me = r.seat; }
           catch (e) { toast(e.message); }
         } }, 'Rejoindre'))));
   }
