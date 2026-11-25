@@ -135,14 +135,32 @@ async function startRoom(r) {
   aiTick(r);
 }
 const AI_DELAY = { pass: 900, chainPass: 900, chainResolve: 700, resolve: 900, startTurn: 1000, fight: 1100, endTurn: 800, play: 750, move: 550, chooseBf: 1500, callParity: 1400, rollDice: 1200, mulligan: 1800 };
-// AI plays one action at a time with a pause so the animations stay readable.
+// The AI's next action. A bug in the AI must never freeze the game: fall back to the safe move (let the spell
+// resolve, pass, answer the prompt, end the turn).
+function aiNext(r) {
+  const s = r.state, me = r.ai.seat;
+  try { return AI.next(s, me, r.ai.level, r.ai.mem); }
+  catch (e) {
+    console.error('AI error:', e);
+    r.ai.mem = {};
+    const top = s.chain && s.chain[s.chain.length - 1];
+    if (s.pending) return s.pending.to === me ? (s.pending.kind === 'bf' ? { type: 'resolve', bf: s.pending.opts[0] } : { type: 'resolve', iids: s.pending.opt ? [] : (s.pending.opts || []).slice(0, s.pending.n) }) : null;
+    if (top) return top.cb.by !== me ? (top.cb.seen ? null : { type: 'chainPass' }) : top.cb.seen ? { type: 'chainResolve' } : null;
+    if (s.showdown) return s.showdown.focus === me ? { type: 'pass' } : null;
+    return s.active === me && s.stage === 'main' ? { type: 'endTurn' } : null;
+  }
+}
+// AI plays one action at a time with a pause so the animations stay readable. The action is chosen again when the
+// pause ends: the human may have played in between (a reaction on the stack...), and a stale choice would skip it.
 function aiTick(r) {
   if (!r.ai || r.timer || !rooms.has(r.tag)) return;
-  const act = AI.next(r.state, r.ai.seat, r.ai.level, r.ai.mem);
-  if (!act) return;
+  const first = aiNext(r);
+  if (!first) return;
   r.timer = setTimeout(() => {
     r.timer = null;
     if (!rooms.has(r.tag)) return;
+    const act = aiNext(r);
+    if (!act) return;
     const err = game.apply(r.state, { ...act, seat: r.ai.seat, p: r.ai.seat });
     if (err) {
       r.ai.mem.q = []; // replan from the current board
@@ -150,7 +168,7 @@ function aiTick(r) {
     }
     broadcast(r);
     aiTick(r);
-  }, AI_DELAY[act.type] || 600);
+  }, AI_DELAY[first.type] || 600);
 }
 const deckById = id => readDecks().find(d => d.id === id);
 
@@ -175,7 +193,17 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
   try {
-    if (p === '/api/cards' && req.method === 'GET') { const R = require('./rules'); return json(res, 200, [...(await loadCards(false)).map(c => (c.type === 'Spell' ? { ...c, nt: R.playFx(c).filter(e => e.kind === 'target').length } : c)), ...R.SYNTH_TOKENS]); }
+    if (p === '/api/cards' && req.method === 'GET') {
+      const R = require('./rules');
+      // nt: units a spell chooses; ab: activated abilities (text, cost, number of targets)
+      const extra = c => {
+        const x = c.type === 'Spell' ? { nt: R.playFx(c).filter(e => e.kind === 'target').length } : {};
+        const ab = R.abilities(c);
+        if (ab.length) x.ab = ab.map(a => ({ text: a.text, e: a.cost.e, p: a.cost.p.length, nt: a.fx.filter(e => e.kind === 'target').length, kill: a.kill, xp: a.xp, other: a.other }));
+        return Object.keys(x).length ? { ...c, ...x } : c;
+      };
+      return json(res, 200, [...(await loadCards(false)).map(extra), ...R.SYNTH_TOKENS]);
+    }
     if (p === '/api/cards/refresh' && req.method === 'POST') return json(res, 200, { count: (await loadCards(true)).length });
     if (p === '/api/info') return json(res, 200, { lan: lanUrls() });
 

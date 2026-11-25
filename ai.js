@@ -416,6 +416,14 @@ function phaseMain(s, me, level) {
     const v = 0.5 + 0.5 * (d.type === 'Unit' ? bodyValue(d) : Math.max(1.5, fxPlan(s, me, d, c.iid).v));
     cands.push({ c, d, v, plan: { targets: [] }, cost: { e: 0, p: [null] }, hide: hidFree[0], pri: 3 });
   }
+  // activated abilities (exhausting a ready unit costs it its attack this turn)
+  for (const x of myAbilities(s, me)) {
+    const plan = fxPlan(s, me, x.d, x.c.iid);
+    if (plan.fx.every(e => e.kind === 'target' && COMBAT_OPS.includes(e.op))) continue;
+    let v = plan.v - (x.ab.kill ? worth(s, x.c) : 0) - (x.owner.type === 'Unit' ? 1.5 : 0);
+    if (v < (level === 'hard' ? 1 : 1.3)) continue;
+    cands.push({ c: x.c, d: x.d, v, plan, cost: x.ab.cost, ability: x.ab.i, pri: 2 });
+  }
   if (!cands.length) return [];
   // a reaction worth holding (counter or combat trick) when the opponent has units or cards in hand
   const quick = z.hand.map(c => G.cd(s, c)).filter(d => d.type === 'Spell' && R.kw(d.text).reaction && R.playFx(d).length);
@@ -436,6 +444,7 @@ function phaseMain(s, me, level) {
   if (!pick.set.length) return [];
   const x = pick.set.sort((a, b) => a.pri - b.pri || (b.d.energy || 0) - (a.d.energy || 0))[0];
   if (x.hide != null) return [{ type: 'hide', iid: x.c.iid, bf: x.hide }];
+  if (x.ability != null) return [{ type: 'activate', iid: x.c.iid, k: x.ability, targets: x.plan.targets, ...(x.plan.bf != null ? { bf: x.plan.bf } : {}) }];
   const act = { type: 'play', iid: x.c.iid, targets: x.plan.targets };
   if (x.plan.bf != null) act.bf = x.plan.bf;
   if (x.d.type === 'Unit' && x.cost !== FREE && R.kw(x.d.text).accelerate) act.accel = afford(s, me, [{ ...x.d, energy: (x.d.energy || 0) + 1, power: (x.d.power || 0) + 1 }]);
@@ -537,6 +546,22 @@ function quickCards(s, me, reactionOnly) {
     return (k.reaction || (!reactionOnly && (k.action || k.ambush))) && R.planCost(runes, pool, R.cardCost(d));
   }), ...hid];
 }
+function myAbilities(s, me, filter) {
+  const pl = s.players[me], out = [];
+  const cardsOn = [...pl.zones.base, ...pl.zones.legend, ...s.bfs.flatMap(b => b.units[me])];
+  for (const c of cardsOn) {
+    if (c.ex) continue;
+    const d = G.cd(s, c);
+    for (const ab of R.abilities(d)) {
+      if (!ab.fx.length || ab.other || (ab.level && (pl.xp || 0) < ab.level) || (ab.xp && (pl.xp || 0) < ab.xp)) continue;
+      if (ab.fx.some(e => e.kind === 'add')) continue; // mana abilities: not planned
+      if (!R.planCost(G.runesOf(s, me), pl.pool, ab.cost)) continue;
+      if (filter && !filter(ab)) continue;
+      out.push({ c, ab, d: { type: 'Spell', name: d.name + '@' + ab.i, text: ab.text }, owner: d });
+    }
+  }
+  return out;
+}
 // value of the combat at battlefield i for `me`: enemy Might destroyed - mine, +-4 for who holds the battlefield
 function fightValue(m, i, att, me) {
   const t = clone(m), op = other(me);
@@ -561,6 +586,12 @@ function combatTrick(s, me, level, reactionOnly) {
     if (d.type !== 'Spell') continue;
     const r = trickPlan(s, m, i, sd.att, me, d, c.iid);
     if (r) opts.push({ v: r.v - (d.energy || 0) * 0.3 - (d.power || 0) * 0.3, act: { type: 'play', iid: c.iid, targets: r.targets, bf: i } });
+  }
+  // [Reaction] / [Action] abilities in the showdown (a unit fighting here can't use one: exhausting it is fine,
+  // exhausted units still deal combat damage)
+  if (!(s.chain && s.chain.length) || reactionOnly) for (const x of myAbilities(s, me, ab => ab.reaction || (ab.action && !reactionOnly))) {
+    const r = trickPlan(s, m, i, sd.att, me, x.d, x.c.iid);
+    if (r) opts.push({ v: r.v - (x.ab.cost.e + x.ab.cost.p.length) * 0.3 - (x.ab.kill ? 1 : 0), act: { type: 'activate', iid: x.c.iid, k: x.ab.i, targets: r.targets, bf: i } });
   }
   if (!opts.length) return null;
   if (level === 'easy') return Math.random() < 0.35 ? opts[rnd(opts.length)].act : null;

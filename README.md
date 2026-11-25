@@ -27,6 +27,16 @@ npm test
 
 Vérifie les règles du moteur et fait jouer des parties IA contre IA sur les vrais decks.
 
+```
+node stress.js [parties par deck=2] [niveau=normal] [filtre sur le nom du deck]
+```
+
+Banc d'essai joueur contre IA : un robot joue le siège humain en mode manuel (paiement, redressement, pioche et
+combats à la main, cartes et cibles parfois au hasard, réponses sur la pile) contre la vraie IA, sur tous les decks.
+Il signale les blocages (personne ne peut agir), les plantages et les actions refusées en boucle.
+
+`node seed-legend-decks.js` ajoute un deck de test légal pour chaque légende qui n'en a pas (`data/decks.json`).
+
 ## Organisation
 
 | Fichier | Rôle |

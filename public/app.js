@@ -1040,7 +1040,15 @@ function aimToggle(id) {
 function aimEnd(go) {
   const c = S.cast; S.cast = null;
   renderAim(); drawArrows();
-  if (go && c) send({ type: 'play', iid: c.iid, targets: c.picks, ...c.extra });
+  if (go && c) send({ type: c.kind || 'play', iid: c.iid, targets: c.picks, ...c.extra });
+}
+// card text symbols for menus: ':rb_energy_2:' -> '2 ⚡', ':rb_rune_fury:' -> '◆ Fury', ':rb_might:' -> 'force'
+const rbText = s => s.replace(/:rb_energy_(\d+):/g, '$1 ⚡').replace(/:rb_rune_rainbow:/g, '◆ au choix').replace(/:rb_rune_(\w+):/g, (m, d) => '◆ ' + d[0].toUpperCase() + d.slice(1)).replace(/:rb_might:/g, 'force').replace(/:rb_exhaust:/g, '↷');
+function activate(iid, k) {
+  const ab = ((cardOf((locate(iid) || {}).c) || {}).ab || [])[k];
+  if (!ab || !ab.nt) return send({ type: 'activate', iid, k });
+  S.cast = { iid, extra: { k }, n: ab.nt, picks: [], kind: 'activate', label: rbText(ab.text) };
+  hideMenu(); renderAim(); drawArrows();
 }
 function renderAim() {
   let bar = $('#aimbar');
@@ -1051,9 +1059,9 @@ function renderAim() {
   const c = S.cast, d = cardOf(locate(c.iid).c);
   for (const [iid, el] of els) { const L = locate(iid); if (aimable(L)) el.classList.add(c.picks.includes(iid) ? 'aimed' : 'aimable'); }
   bar.innerHTML = '';
-  bar.append(h('b', {}, `🎯 ${d ? d.name : 'Sort'}`),
+  bar.append(h('b', {}, `${c.kind === 'activate' ? '⚡' : '🎯'} ${d ? d.name : 'Sort'}`), c.label ? h('i', {}, c.label) : '',
     h('span', {}, `Cliquez sur ${c.n > 1 ? `jusqu’à ${c.n} cibles` : 'la cible'} sur le plateau (${c.picks.length}/${c.n}).`),
-    h('button', { class: 'btn gold', onclick: () => aimEnd(true) }, c.picks.length ? 'Lancer' : 'Lancer sans cible'),
+    h('button', { class: 'btn gold', onclick: () => aimEnd(true) }, c.kind === 'activate' ? 'Activer' : c.picks.length ? 'Lancer' : 'Lancer sans cible'),
     h('button', { class: 'btn', onclick: () => aimEnd(false) }, 'Annuler'));
 }
 // SVG overlay: one curved arrow per declared target, from the spell on the stack (or the card being cast)
@@ -1206,6 +1214,7 @@ function cardMenu(e, iid) {
     L.zone === 'trash' && mine && /\[Flow\]/.test(txt) ? [`✦ Jouer depuis la défausse (Flow : ${costLabel(txt, 'Flow')})`, () => { closeModal(); send({ type: 'play', iid, flow: true }); }] : null,
     onBoard && mine && d && d.type === 'Gear' && /\[Equip\]/.test(txt) ? (c.att ? ['Détacher l’équipement', () => send({ type: 'unequip', iid })]
       : { sub: `Équiper (${costLabel(txt, 'Equip')})`, items: myUnits.length ? myUnits.map(u => [(cardOf(u) || {}).name || 'unité', () => send({ type: 'equip', iid, unit: u.iid })]) : [['Aucune unité', () => {}]] }) : null,
+    ...(onBoard && mine && d && d.ab ? d.ab.map((ab, k) => [`⚡ ${rbText(ab.text)}${ab.e || ab.p || ab.kill || ab.xp ? ` (${[ab.e ? ab.e + ' ⚡' : '', ab.p ? ab.p + ' ◆' : '', ab.xp ? ab.xp + ' XP' : '', ab.kill ? 'détruire cette carte' : ''].filter(Boolean).join(' + ')})` : ''}${c.ex ? ' — épuisé' : ''}`, () => activate(iid, k)]) : []),
     onBoard && mine && /\[Empower\]/.test(txt) ? [c.emp ? 'Retirer Empowered' : `Empower (${costLabel(txt, 'Empower')})`, () => send({ type: 'empower', iid })] : null,
     onBoard && mine && d && d.name === 'Gold' && d.supertype === 'Token' ? ['Utiliser le Gold (+1 puissance au choix)', () => send({ type: 'gold', iid })] : null,
     inHand && mine && d && ['Unit', 'Spell', 'Gear'].includes(d.type) ? [d.type === 'Spell' ? '✦ Lancer (sur la pile)' : '✦ Jouer', () => playCard(iid), 'P'] : null,

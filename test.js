@@ -373,6 +373,47 @@ assert.equal(s.bfs[1].ctrl, 'p2', 'undo restores the combat');
     assert.equal(r7.iid, 'th', 'the AI answers with Thrill of the Hunt');
   }
 }
+{ // abilities, auras, triggers, stack ownership (real card texts)
+  const real = fs.existsSync('./data/cards.json') ? require('./data/cards.json') : null;
+  const get = n => real && real.find(c => c.name === n);
+  if (real) {
+    const names = ['Garen, Commander', 'Iron Ballista', 'Vicious Snapjaws', 'Carnivorous Snapvine', 'Falling Star', 'Bilgewater Tracker'];
+    const cs = [...cards, ...names.map(get)];
+    const t = newGame(deck('B1'), deck('B2'), cs);
+    pregame(t, { p1: () => [], p2: () => [] });
+    for (const c of cs) t.cd[c.id] = c;
+    t.auto = { p2: true }; t.active = 'p1'; t.started = t.turn;
+    const mkc = (id, name, who) => ({ iid: id, cid: name.length > 2 ? get(name).id : name, owner: who, ex: false, dmg: 0, buff: 0 });
+    // aura: Garen gives the other friendly units at his battlefield +1 Might
+    const u1 = mkc('u1', 'U', 'p1'), u2 = mkc('u2', 'U', 'p1');
+    t.bfs[0].units.p1.push(mkc('ga', 'Garen, Commander', 'p1'), u1); t.players.p1.zones.base.push(u2);
+    assert.equal(g.hp(t, u1), 3, 'Garen: +1 here'); assert.equal(g.hp(t, u2), 2, 'not in base');
+    // activated ability: Iron Ballista deals 2 to a unit at a battlefield (declared target)
+    const e1 = mkc('e1', 'U', 'p2'); t.bfs[1].units.p2.push(e1);
+    t.players.p1.zones.base.push(mkc('ib', 'Iron Ballista', 'p1'));
+    assert.equal(g.apply(t, { type: 'activate', seat: 'p1', iid: 'ib', k: 0, targets: ['e1'] }), null);
+    assert.ok(!t.bfs[1].units.p2.length && g.find(t, 'ib').c.ex, 'Ballista kills the 2-Might unit and is exhausted');
+    assert.ok(g.apply(t, { type: 'activate', seat: 'p1', iid: 'ib', k: 0 }), 'not twice');
+    // trigger: Vicious Snapjaws gains 1 XP when another friendly unit dies
+    t.players.p1.zones.base.push(mkc('vs', 'Vicious Snapjaws', 'p1'));
+    const xp = t.players.p1.xp || 0;
+    assert.equal(g.apply(t, { type: 'kill', seat: 'p1', iid: 'u2' }), null);
+    assert.equal(t.players.p1.xp, xp + 1, 'Snapjaws: +1 XP');
+    // play effect: Carnivorous Snapvine duels an enemy unit at a battlefield
+    const e2 = mkc('e2', 'U', 'p2'); t.bfs[1].units.p2.push(e2);
+    t.players.p1.zones.hand.push(mkc('sv', 'Carnivorous Snapvine', 'p1'));
+    assert.equal(g.apply(t, { type: 'play', seat: 'p1', iid: 'sv', targets: ['e2'] }), null);
+    assert.ok(!t.bfs[1].units.p2.length, 'Snapvine kills the enemy');
+    // stack: only the owner resolves its spell; the opponent lets it through
+    t.players.p2.zones.hand.push(mkc('fs', 'Falling Star', 'p2'));
+    t.active = 'p2'; t.auto = { p1: true }; // p2 casts without paying (manual), p1 lets it through
+    assert.equal(g.apply(t, { type: 'play', seat: 'p2', iid: 'fs', targets: ['u1'] }), null);
+    assert.ok(g.apply(t, { type: 'chainResolve', seat: 'p1' }), 'p1 cannot resolve p2 spell');
+    assert.equal(g.apply(t, { type: 'chainPass', seat: 'p1' }), null);
+    assert.equal(g.apply(t, { type: 'chainResolve', seat: 'p2' }), null);
+    assert.ok(!t.chain.length);
+  }
+}
 console.log('reducer OK');
 
 /* ---- AI vs AI on real data ---- */

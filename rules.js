@@ -125,6 +125,13 @@ const CARD_FX = {
   'Lightning Rush': [{ kind: 'draw', n: 1 }],
   'Against the Odds': [T('might', { n: 2, side: 'friendly', where: 'bf', perEnemy: true })],
 };
+Object.assign(CARD_FX, {
+  'Solari Chief': [T('stunOrKill', { side: 'enemy' })],
+  'Elnuk Herd': [T('might', { n: 3, side: 'friendly', notSelf: true })],
+  'Walking Roost': [{ kind: 'token', who: 'opp', name: 'Bird', n: 1 }],
+  'Chakram Dancer': [{ kind: 'allKw', kw: 'shield', n: 1, here: true, notSelf: true }],
+  'Iridescent Avian': [], // its ability is in the table of abilities below
+});
 function playFx(card, ctx = {}) {
   if (CARD_FX[card.name]) return CARD_FX[card.name].map((e, i) => ({ who: 'self', ...e, at: i }));
   const text = card.text || '';
@@ -133,8 +140,8 @@ function playFx(card, ctx = {}) {
   if (fxCache.has(key)) return fxCache.get(key);
   // keyword headers with costs ("[Repeat] :rb_energy_1:", "[Flow] ...") are not effects
   const raw = text.replace(/\([^)]*\)/g, '').replace(/\[(Repeat|Flow|Equip|Empower|Deflect|Hidden|Action|Reaction|Accelerate|Ambush|Quick-Draw|Weaponmaster|Deploy|Ganking|Tank|Backline)\](\s*—)?\s*(:rb_(energy_\d+|rune_\w+):)*/gi, ' ');
-  const risky = /\bif\b|\bmay\b|choose (one|two|three)|additional cost|for each|instead|unless|\bup to\b|\bor\b(?! less)|\bto (give|deal|draw|play|ready|move|channel|buff|stun|kill|return|gain)\b/i; // "[do X] to [do Y]": a cost, left to the players
-  let sentences = raw.split(/(?<=[.!])\s*/).reduce((a, x) => (/^(They|It|Then)\b/.test(x) && !/^Then,? if\b/i.test(x) && a.length ? (a[a.length - 1] += ' ' + x) : a.push(x), a), []);
+  const risky = /\bif\b|\bmay\b|choose (one|two|three)|additional cost|for each|instead|unless|\bor\b(?! less)|\bto (give|deal|draw|play|ready|move|channel|buff|stun|kill|return|gain)\b/i; // "[do X] to [do Y]": a cost, left to the players
+  let sentences = raw.split(/(?<=[.!])\s*/).reduce((a, x) => (/^(They|It|Then|We)\b/.test(x) && !/^Then,? if\b/i.test(x) && a.length ? (a[a.length - 1] += ' ' + x) : a.push(x), a), []);
   // dependent keywords: [Legion] needs another card played this turn, [Level N] needs N XP
   sentences = sentences.filter(x => {
     const l = /^\s*(?:\[[^\]]*\]\s*)*\[Level (\d+)\]/i.exec(x);
@@ -145,12 +152,12 @@ function playFx(card, ctx = {}) {
   const fx = [];
   if (card.type !== 'Spell') {
     if (/(^|[.\]]\s*)\[Vision\]/.test(text.replace(/\([^)]*\)/g, ''))) fx.push({ kind: 'predict', n: 1, who: 'self', at: -1 });
-    sentences = sentences.filter(x => /^\s*(\[[^\]]*\]\s*)*When you play (me|this),/i.test(x)).map(x => x.replace(/^[^,]*,/, ''));
+    sentences = sentences.filter(x => /^\s*(\[[^\]]*\]\s*(—\s*)?)*When you play (me|this),/i.test(x)).map(x => x.replace(/^[^,]*,/, ''));
   }
   // "Choose a unit. Deal 3 to it." -> "Deal 3 to a unit."
   sentences = sentences.map(x => { const y = x.replace(/^(\s*(?:then,?\s*)?)you may /i, '$1OPTX '); return y !== x && !risky.test(y) ? y : x; });
   let t = sentences.filter(x => !risky.test(x)).join(' ')
-    .replace(/\[(Buff|Stun|Predict|Burn|Recall|Ready)\]/gi, (m, w) => w.toLowerCase())
+    .replace(/\[(Buff|Stun|Predict|Burn|Recall|Ready|Add)\]/gi, (m, w) => w.toLowerCase())
     .replace(/\[[^\]]*\]/g, ' ')
     .replace(new RegExp(String.raw`choose ` + UNIT + String.raw`\.\s*(deal \d+ to|stun|kill|ready|return|recall|give) it\b`, 'gi'), (m, who, where = '', max, verb) => `${verb} ${who} unit${where}${max ? ` with ${max} :rb_might: or less` : ''}`);
   const add = (idx, e) => fx.push({ ...e, at: idx });
@@ -185,6 +192,26 @@ function playFx(card, ctx = {}) {
   if ((m = /\bkill all units\b/i.exec(t))) add(m.index, { kind: 'wipe', who: 'self' });
   if ((m = /\bdeal (\d+) to all enemy units at a battlefield\b/i.exec(t))) add(m.index, { kind: 'aoe', n: +m[1], who: 'self' });
   if ((m = /\bgive friendly units ([+-]\d+) :rb_might: this turn/i.exec(t))) add(m.index, { kind: 'allMight', n: +m[1], who: 'self' });
+  if ((m = /\bgive your other units( here)? ([+-]\d+) :rb_might: this turn/i.exec(t))) add(m.index, { kind: 'allMight', n: +m[2], who: 'self', notSelf: true, here: !!m[1] });
+  if ((m = /\bgive enemy units( here)? ([+-−–]\d+) :rb_might: this turn(,? to a minimum of 1)?/i.exec(t))) add(m.index, { kind: 'allMight', n: -Math.abs(+m[2].replace(/[−–]/, '-')), who: 'self', enemy: true, here: !!m[1], min: m[3] ? 1 : null });
+  // "deal 1 to each of up to 2 units", "deal 2 to up to two enemy units"
+  if ((m = /\bdeal (\d+) to (?:each of )?up to (\w+) (enemy |friendly )?units?( at a battlefield| here)?/i.exec(t))) {
+    const k = NUM[m[2].toLowerCase()] || +m[2] || 1;
+    for (let i = 0; i < k; i++) add(m.index + i / 10, { kind: 'target', who: 'self', op: 'dmg', n: +m[1], side: /enemy/i.test(m[3] || '') ? 'enemy' : /friendly/i.test(m[3] || '') ? 'friendly' : 'any', where: /battlefield/.test(m[4] || '') ? 'bf' : /here/.test(m[4] || '') ? 'here' : 'any', max: null, opt: true });
+  }
+  if ((m = /\breturn all units with (\d+) :rb_might: or less to their owners'? hands/i.exec(t))) add(m.index, { kind: 'massBounce', max: +m[1], who: 'self' });
+  if ((m = /\breturn another friendly unit and an enemy unit to their owners'? hands/i.exec(t))) {
+    add(m.index, { kind: 'target', who: 'self', op: 'hand', n: 0, side: 'friendly', notSelf: true, where: 'any', max: null });
+    add(m.index + 0.5, { kind: 'target', who: 'self', op: 'hand', n: 0, side: 'enemy', where: 'any', max: null });
+  }
+  // "choose an enemy unit (at a battlefield). We deal damage equal to our Mights to each other." (the unit itself duels)
+  if ((m = /\bchoose an enemy unit( at a battlefield)?\.\s*We deal damage equal to our Mights to each other/i.exec(t))) add(m.index, { kind: 'target', who: 'self', op: 'duelSelf', n: 0, side: 'enemy', where: m[1] ? 'bf' : 'any', max: null });
+  if ((m = /\bmove (?:a|an enemy) unit from a battlefield to its base/i.exec(t))) add(m.index, { kind: 'target', who: 'self', op: 'recall', n: 0, side: /enemy/.test(m[0]) ? 'enemy' : 'any', where: 'bf', max: null });
+  if ((m = /\b[Rr]eady (?:another )?friendly ([A-Z][\w']+?)s?\b(?! unit)/.exec(t)) && !/^(unit|legend|gear|rune)/i.test(m[1])) add(m.index, { kind: 'target', who: 'self', op: 'ready', n: 0, side: 'friendly', notSelf: /another/.test(m[0]), tag: m[1], where: 'any', max: null });
+  if ((m = /\bready a friendly legend\b/i.exec(t))) add(m.index, { kind: 'readyLegend', who: 'self' });
+  if ((m = /\b(ready|buff) me\b/i.exec(t)) && m[1].toLowerCase() === 'ready') add(m.index, { kind: 'target', who: 'self', op: 'ready', n: 0, side: 'friendly', self: true, where: 'any', max: null });
+  if ((m = /\bgive me ([+-]\d+) :rb_might: this turn/i.exec(t))) add(m.index, { kind: 'target', who: 'self', op: 'might', n: +m[1], side: 'friendly', self: true, where: 'any', max: null });
+  if ((m = /\badd ((?::rb_(?:energy_\d+|rune_\w+):)+)/i.exec(t))) add(m.index, { kind: 'add', who: 'self', cost: parseCost(m[1]) });
   if ((m = /\bchannel (\d+) runes?( exhausted)?/i.exec(t))) add(m.index, { kind: 'channel', n: +m[1], ex: !!m[2], who: 'self' });
   if ((m = /\bgain (\d+) xp\b/i.exec(t))) add(m.index, { kind: 'xp', n: +m[1], who: 'self' });
   if ((m = /\bpredict(?: (\d+))?/i.exec(t))) add(m.index, { kind: 'predict', n: +(m[1] || 1), who: 'self' });
@@ -193,6 +220,21 @@ function playFx(card, ctx = {}) {
   fx.sort((a, b) => a.at - b.at);
   fxCache.set(key, fx);
   return fx;
+}
+// Triggered abilities of a unit or gear: the effects of "When I attack, ...", "When I conquer, ...", "[Deathknell] — ..."
+// (ev: attack | defend | conquer | hold | move | deathknell), read with the same parser as a spell.
+const TRIGGER = {
+  attack: /When I attack(?: or defend)?,\s*/i, defend: /When I (?:attack or )?defend,\s*/i, conquer: /When I conquer,\s*/i,
+  hold: /When I hold,\s*/i, move: /When I move(?: to a battlefield)?,\s*/i,
+  playSpell: /When you play a spell,\s*/i, playUnit: /When you play a unit,\s*/i, allyDies: /When (?:another|a) friendly unit dies,\s*/i, deathknell: /\[Deathknell\]\s*(?:—|\[(?:>|&gt;)\])?\s*/i,
+};
+function triggerFx(card, ev) {
+  const t = (card.text || '').replace(/\([^)]*\)/g, ''), m = TRIGGER[ev] && TRIGGER[ev].exec(t);
+  if (!m) return [];
+  const rest = t.slice(m.index + m[0].length).split(/(?<=[.!])\s+/);
+  let body = rest[0];
+  for (const x of rest.slice(1)) { if (/^(Then|It|They)\b/.test(x) && !/^Then,? if\b/i.test(x)) body += ' ' + x; else break; }
+  return playFx({ type: 'Spell', name: card.name + '#' + ev, text: body });
 }
 // "I enter ready" (unconditional) — otherwise units enter exhausted
 const entersReady = card => /(^|[.\]]\s*)I enter ready/.test((card.text || '').replace(/\([^)]*\)/g, ''));
@@ -303,4 +345,48 @@ const SYNTH_TOKENS = [
   { id: 'tok-gold', name: 'Gold', type: 'Gear', might: null, tags: [], text: 'Kill this, :rb_exhaust:: [Reaction] — [Add] :rb_rune_rainbow:.' },
 ].map(c => ({ type: 'Unit', supertype: 'Token', domain: [], energy: null, power: null, text: '', img: '', rarity: 'Token', set: 'TOK', code: c.id, alt: false, landscape: false, ...c }));
 
-module.exports = { CARD_FX, parseCost, kwCost, cardCost, sumCost, planCost, tokensIn, deathTokens, SYNTH_TOKENS, kw, spellFx, planPay, combat, domOf, playFx, entersReady };
+// Activated abilities "<cost>, :rb_exhaust:: <effect>" (units, gear, legends). Costs other than Energy / Power /
+// exhausting / killing this / spending XP are left to the player (the AI doesn't use those).
+const abilCache = new Map();
+function abilities(card) {
+  const text = card.text || '';
+  if (abilCache.has(text)) return abilCache.get(text);
+  const out = [];
+  const t = text.replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ');
+  const re = /((?:\[[^\]]*\](?:\[(?:>|&gt;)\])?\s*(?:—\s*)?)*)((?:[^.:\]]|:rb_\w+:)*?:rb_exhaust:)\s*:\s*((?:\[(?:Reaction|Action)\][^—]*—\s*)?)([^.]*\.(?:\s*(?:Then|It)\b[^.]*\.)*)/g;
+  let m;
+  while ((m = re.exec(t))) {
+    const head = m[1] + m[3], costTxt = m[2], effect = m[4].trim();
+    if (/\[Empowered\]/.test(m[1])) continue; // only while empowered: left to the player
+    const lv = /\[Level (\d+)\]/.exec(m[1]);
+    const cost = parseCost(costTxt);
+    const fx = playFx({ type: 'Spell', name: (card.name || '') + '@' + out.length, text: effect });
+    out.push({
+      i: out.length, text: effect, cost, fx,
+      kill: /Kill this/i.test(costTxt), xp: +((/Spend (\d+) XP/i.exec(costTxt) || [])[1] || 0),
+      other: /Recycle|Discard|Exhaust (?:a|an|another)|Banish|Disempower|Return/i.test(costTxt),
+      reaction: /\[Reaction\]/.test(head), action: /\[Action\]/.test(head), level: lv ? +lv[1] : 0,
+    });
+  }
+  abilCache.set(text, out);
+  return out;
+}
+// Static Might bonuses: "Your units have +1 :rb_might:", "Other friendly units have +1 :rb_might: here.",
+// "Your Mechs have +1 :rb_might:", "Your token units have +1", battlefields "Units here have +1".
+const auraCache = new Map();
+function auras(card) {
+  const t = (card.text || '').replace(/\([^)]*\)/g, '');
+  if (auraCache.has(t)) return auraCache.get(t);
+  const out = [];
+  for (const sent of t.split(/(?<=\.)\s+/)) {
+    if (/\[Empowered\]|\bif\b|\bwhile\b/i.test(sent)) continue;
+    const lv = /\[Level (\d+)\]/.exec(sent);
+    let m;
+    if ((m = /\b(Your|Other friendly|Friendly|Champion) (units|([A-Z][\w']*?)s|token units)( here)? have \+(\d+) :rb_might:( here)?/.exec(sent)))
+      out.push({ n: +m[5], who: m[1] === 'Champion' ? 'any' : 'mine', notSelf: m[1] === 'Other friendly', here: !!(m[4] || m[6]), tag: m[3] && m[2] !== 'units' ? m[3] : null, token: m[2] === 'token units', champion: m[1] === 'Champion', level: lv ? +lv[1] : 0 });
+    else if ((m = /^\s*Units here have \+(\d+) :rb_might:/.exec(sent))) out.push({ n: +m[1], who: 'any', here: true, level: 0 });
+  }
+  auraCache.set(t, out);
+  return out;
+}
+module.exports = { abilities, auras, triggerFx, CARD_FX, parseCost, kwCost, cardCost, sumCost, planCost, tokensIn, deathTokens, SYNTH_TOKENS, kw, spellFx, planPay, combat, domOf, playFx, entersReady };

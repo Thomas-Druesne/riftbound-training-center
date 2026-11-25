@@ -40,9 +40,27 @@ const gearOn = (s, c) => SEATS.flatMap(p => s.players[p].zones.base.filter(g => 
 function hp(s, c, role) {
   const d = cd(s, c), k = R.kw(d.text);
   const eq = gearOn(s, c).reduce((t, g) => t + (cd(s, g).might || 0), 0);
-  return Math.max(0, (d.might || 0) + eq + (c.buff || 0) + (c.tb || 0) + (role === 'a' ? k.assault + (c.ta || 0) : role === 'd' ? k.shield + (c.ts || 0) : 0));
+  return Math.max(0, (d.might || 0) + eq + (c.buff || 0) + (c.tb || 0) + auraBonus(s, c, d) + (role === 'a' ? k.assault + (c.ta || 0) : role === 'd' ? k.shield + (c.ts || 0) : 0));
 }
 const lethal = (s, c) => Math.max(1, hp(s, c));
+function auraBonus(s, c, d) {
+  if (d.type !== 'Unit') return 0;
+  let f = null;
+  for (const p of SEATS) { if (s.players[p].zones.base.includes(c)) f = { p, bf: null }; s.bfs.forEach((b, i) => { if (b.units[p].includes(c)) f = { p, bf: i }; }); }
+  if (!f) return 0;
+  let n = 0;
+  const xp = s.players[f.p].xp || 0;
+  const srcs = [...s.players[f.p].zones.base.map(x => [x, null]), ...s.players[f.p].zones.legend.map(x => [x, null]), ...s.bfs.flatMap((b, i) => b.units[f.p].map(x => [x, i]))];
+  for (const [src, at] of srcs) for (const a of R.auras(cd(s, src))) {
+    if (a.who !== 'mine' || (a.level && xp < a.level) || (a.notSelf && src === c)) continue;
+    if (a.here && (at == null || at !== f.bf)) continue;
+    if ((a.tag && !(d.tags || []).includes(a.tag)) || (a.token && d.supertype !== 'Token')) continue;
+    n += a.n;
+  }
+  const b = f.bf != null && s.bfs[f.bf].card;
+  if (b) for (const a of R.auras(cd(s, b))) if (a.who === 'any' && (!a.champion || d.supertype === 'Champion')) n += a.n;
+  return n;
+}
 const isToken = (s, c) => cd(s, c).supertype === 'Token';
 function toTrash(s, c) {
   if (isToken(s, c)) return; // tokens cease to exist outside the board
@@ -58,6 +76,7 @@ const scoredOf = (s, p) => ((s.scored || (s.scored = { p1: [], p2: [] }))[p]);
 function conquer(s, b, p) {
   const bf = s.bfs[b], pl = s.players[p], nm = bf.card ? name(s, bf.card) : 'un champ de bataille';
   bf.ctrl = p;
+  for (const c of bf.units[p].slice()) trigger(s, c, 'conquer', p, b);
   const sc = scoredOf(s, p);
   if (sc.includes(b)) { log(s, `${seatName(s, p)} reprend ${nm} (déjà marqué ce tour : pas de point).`); return; }
   sc.push(b);
@@ -89,10 +108,18 @@ function kill(s, f) {
   detach(s, f.c);
   toTrash(s, f.c);
   log(s, `☠ ${name(s, f.c)} est détruit.`);
-  if (!auto(s, f.c.owner)) { if (/\[Deathknell\]/.test(cd(s, f.c).text || '')) log(s, `↳ Deathknell de ${name(s, f.c)} : à appliquer à la main.`); return; }
-  const dd = R.kw(cd(s, f.c).text).deathDraw; // [Deathknell] > Draw N
-  if (dd) { const n = draw(s, f.c.owner, dd); log(s, `${seatName(s, f.c.owner)} pioche ${n} (Deathknell de ${name(s, f.c)}).`); }
-  for (const e of R.deathTokens(cd(s, f.c).text)) makeTokens(s, f.c.owner, e, null, `Deathknell de ${name(s, f.c)}`);
+  trigger(s, f.c, 'deathknell', f.c.owner, f.zone === 'bf' ? f.bf : null);
+  if (f.p && cd(s, f.c).type === 'Unit') for (const u of mineOnBoard(s, f.p)) trigger(s, u, 'allyDies', f.p, null);
+}
+const mineOnBoard = (s, p) => [...s.players[p].zones.base, ...s.players[p].zones.legend, ...s.bfs.flatMap(b => b.units[p])];
+// A unit's triggered ability: its effects are queued like play effects (choices become prompts).
+const EV = { attack: 'attaque', defend: 'défend', conquer: 'conquiert', hold: 'tient', move: 'se déplace', deathknell: 'Deathknell' };
+function trigger(s, c, ev, p, bf) {
+  const d = cd(s, c), fx = R.triggerFx(d, ev);
+  if (!fx.length) return;
+  log(s, `↳ ${d.name} ${ev === 'deathknell' ? ': Deathknell' : EV[ev]} : capacité déclenchée.`);
+  (s.fxQueue || (s.fxQueue = [])).push(...fx.map(e => ({ ...e, by: p, card: d.name, src: c.iid, bfAt: bf })));
+  if (!s.fxRun) runFx(s);
 }
 // Token instances: an official token card when one exists (Recruit, Bird, Sprite, Gold), otherwise a drawn one.
 function tokenCid(s, nm) {
@@ -135,6 +162,8 @@ function openShowdown(s, b, att) {
   const bf = s.bfs[b];
   s.showdown = { bf: b, att, focus: att, passes: 0, fresh: true, last: null };
   log(s, `⚔ Affrontement sur ${bf.card ? name(s, bf.card) : 'le champ de bataille'} : ${seatName(s, att)} attaque. Chacun peut jouer des cartes [Action]/[Reaction], puis passer.`);
+  for (const c of bf.units[att].slice()) trigger(s, c, 'attack', att, b);
+  for (const c of bf.units[other(att)].slice()) trigger(s, c, 'defend', other(att), b);
 }
 function closeShowdown(s) {
   const sd = s.showdown; s.showdown = null;
@@ -168,10 +197,16 @@ function resolveTop(s) {
   if (!s.chain.length && s.showdown) { s.showdown.focus = other(s.showdown.last || p); s.showdown.passes = 0; }
   return null;
 }
+// units of p at the location of the effect's source card ("here")
+function hereUnits(s, e, p) {
+  const f = e.src && find(s, e.src), at = e.bfAt != null ? e.bfAt : f && f.zone === 'bf' ? f.bf : null;
+  return (at != null ? s.bfs[at].units[p] : s.players[p].zones.base).filter(c => cd(s, c).type === 'Unit');
+}
 const unitsOf = (s, p) => [...s.players[p].zones.base, ...s.bfs.flatMap(b => b.units[p])].filter(c => cd(s, c).type === 'Unit');
 // Resolve queued play effects in order; stop at the first one that needs a player's choice.
 function runFx(s) {
-  runFxLoop(s);
+  s.fxRun = true;
+  try { runFxLoop(s); } finally { s.fxRun = false; }
   if (!s.pending && !(s.fxQueue && s.fxQueue.length)) { delete s.fxPre; delete s.fxDeclared; delete s.fxMark; }
 }
 function runFxLoop(s) {
@@ -216,6 +251,17 @@ function runFxLoop(s) {
       log(s, `${e.card} inflige ${e.n} à ${us.length} unité${us.length > 1 ? 's' : ''}.`);
       for (const c of us) if (c.dmg >= lethal(s, c)) { const f = find(s, c.iid); if (f) kill(s, f); }
       syncCtrl(s);
+    } else if (e.kind === 'massBounce') {
+      const list = SEATS.flatMap(p => unitsOf(s, p)).filter(c => hp(s, c) <= e.max);
+      for (const c of list) applyTarget(s, { op: 'hand', card: e.card }, c.iid, to);
+    } else if (e.kind === 'readyLegend') { for (const c of s.players[to].zones.legend) c.ex = false; log(s, `La légende de ${T} est redressée (${e.card}).`); }
+    else if (e.kind === 'add') {
+      const pool = s.players[to].pool || (s.players[to].pool = newPool());
+      pool.e += e.cost.e; for (const x of e.cost.p) pool.p.push(x ? x[0] : 'any');
+      log(s, `${T} ajoute ${costText(e.cost)} à sa réserve (${e.card}).`);
+    } else if (e.kind === 'allKw') {
+      for (const c of hereUnits(s, e, to).filter(c => !(e.notSelf && c.iid === e.src))) { if (e.kw === 'shield') c.ts = (c.ts || 0) + e.n; }
+      log(s, `${e.card} : les autres unités de ${T} ici gagnent [Shield${e.n > 1 ? ' ' + e.n : ''}] ce tour.`);
     } else if (e.kind === 'readyAll' || e.kind === 'exhaustAll') {
       for (const c of unitsOf(s, to)) c.ex = e.kind === 'exhaustAll';
       log(s, `Les unités de ${T} sont ${e.kind === 'readyAll' ? 'redressées' : 'épuisées'} (${e.card}).`);
@@ -227,7 +273,12 @@ function runFxLoop(s) {
     } else if (e.kind === 'wipe') {
       for (const f of SEATS.flatMap(p => unitsOf(s, p)).map(c => find(s, c.iid))) kill(s, f);
       syncCtrl(s);
-    } else if (e.kind === 'allMight') { for (const c of unitsOf(s, to)) c.tb = (c.tb || 0) + e.n; log(s, `Les unités de ${T} gagnent ${e.n > 0 ? '+' : ''}${e.n} force ce tour (${e.card}).`); }
+    } else if (e.kind === 'allMight') {
+      const side = e.enemy ? other(to) : to;
+      const us = (e.here ? hereUnits(s, e, side) : unitsOf(s, side)).filter(c => !(e.notSelf && c.iid === e.src));
+      for (const c of us) { const n = e.min != null ? Math.max(e.n, Math.min(0, e.min - hp(s, c))) : e.n; c.tb = (c.tb || 0) + n; }
+      log(s, `${e.enemy ? `Les unités adverses` : `Les ${e.notSelf ? 'autres ' : ''}unités de ${T}`}${e.here ? ' ici' : ''} gagnent ${e.n > 0 ? '+' : ''}${e.n} force ce tour (${e.card}).`);
+    }
     else if (e.kind === 'channel') { const z = s.players[to].zones, k = channel(s, to, e.n); if (e.ex) z.runes.slice(-k).forEach(r => (r.ex = true)); log(s, `${T} canalise ${k} rune${k > 1 ? 's' : ''}${e.ex ? ' épuisée' + (k > 1 ? 's' : '') : ''} (${e.card}).`); }
     else if (e.kind === 'xp') { s.players[to].xp = (s.players[to].xp || 0) + e.n; log(s, `${T} gagne ${e.n} XP (${e.card}).`); }
     else if (e.kind === 'burn') { const k = burn(s, to, e.n); log(s, `${T} brûle ${k} carte${k > 1 ? 's' : ''} du dessus de son deck (${e.card}).`); }
@@ -270,6 +321,8 @@ function candidates(s, p, e) {
     if (e.side === 'enemy' && ctrl === p) return;
     if (e.side === 'friendly' && ctrl !== p) return;
     if (e.notSelf && c.iid === e.src) return;
+    if (e.self && c.iid !== e.src) return;
+    if (e.tag && !(d.tags || []).includes(e.tag)) return;
     if (e.where === 'bf' && where !== 'bf') return;
     if (e.where === 'base' && where !== 'base') return;
     if (e.where === 'here' && (where !== 'bf' || (e.bfAt != null && bf !== e.bfAt))) return;
@@ -308,6 +361,8 @@ function applyTarget(s, e, iid, p) {
   else if (e.op === 'shield') { c.ts = (c.ts || 0) + e.n; if (e.tank) c.tt = true; log(s, `${N} gagne [Shield ${e.n}]${e.tank ? ' et [Tank]' : ''} ce tour${src}.`); }
   else if (e.op === 'double') { const n = hp(s, c); c.tb = (c.tb || 0) + n; log(s, `La force de ${N} est doublée ce tour (+${n})${src}.`); }
   else if (e.op === 'mark') { s.fxMark = c.iid; return; }
+  else if (e.op === 'duelSelf') { const o = e.src && find(s, e.src); if (o && ['base', 'bf'].includes(o.zone)) duel(s, o, f); return; }
+  else if (e.op === 'stunOrKill') { if (c.st) { kill(s, f); syncCtrl(s); return; } c.st = true; log(s, `${N} est étourdi${src}.`); }
   else if (e.op === 'duel') { const o = s.fxMark && find(s, s.fxMark); s.fxMark = null; if (o) duel(s, o, f); return; }
   else if (e.op === 'dmgSplash') {
     c.dmg = (c.dmg || 0) + e.n; log(s, `${N} subit ${e.n} dégâts${src}.`);
@@ -562,6 +617,7 @@ function startTurn(s, p) {
     const held = s.bfs.filter(b => b.ctrl === p).length;
     log(s, `— Tour ${s.turn} · ${W} : à vous de redresser, ${held ? `marquer ${held} point${held > 1 ? 's' : ''} (tenir), ` : ''}canaliser ${second ? 3 : 2} runes et piocher 1 carte.`);
     s.started = s.turn;
+    s.bfs.forEach((b, i) => { if (b.ctrl === p) for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); });
     return;
   }
   readyAll(s, p);
@@ -578,6 +634,7 @@ function startTurn(s, p) {
   const d = auto(s, p) ? draw(s, p, 1) : 0; // a human draws by hand (click the deck)
   log(s, `— Tour ${s.turn} · ${W} : réveil, ${held ? `+${held} point${held > 1 ? 's' : ''} (tenir), ` : ''}canalise ${ch}, ${auto(s, p) ? `pioche ${d}` : "à vous de piocher (cliquez sur votre deck)"}.`);
   s.started = s.turn;
+  s.bfs.forEach((b, i) => { if (b.ctrl === p) for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); });
   winCheck(s, p);
 }
 
@@ -751,7 +808,12 @@ function act(s, a, who) {
       // a unit put onto the board from hand/deck without paying still enters exhausted
       if (['hand', 'main', 'champion', 'trash', 'banish', 'hidden'].includes(f.zone) && (toZone === 'base' || toZone === 'bf') && cd(s, c).type === 'Unit' && !R.entersReady(cd(s, c))) c.ex = true;
       syncCtrl(s);
+      const sd0 = s.showdown;
       if (a.to.bf != null && f.bf !== a.to.bf && cd(s, c).type === 'Unit') arrive(s, a.to.bf, a.to.side, a.quiet);
+      if (boardMove && cd(s, c).type === 'Unit') {
+        trigger(s, c, 'move', f.p, a.to.bf != null ? a.to.bf : null);
+        if (sd0 && sd0 === s.showdown && sd0.fresh && sd0.att === f.p && sd0.bf === a.to.bf) trigger(s, c, 'attack', f.p, a.to.bf);
+      }
       return null;
     }
     case 'play': { // AI: pays and resolves its effects automatically. Human: no payment, effects done by hand.
@@ -811,6 +873,7 @@ function act(s, a, who) {
         c.cb = { by: p, seen: false, flow: !!flow, repeat: !!repeat, legion, targets: tg, bf: a.bf, fx: R.playFx(d, { legion, xp: pl.xp || 0 }).length > 0 };
         (s.chain || (s.chain = [])).push(c);
         log(s, `✦ ${seatName(s, p)} lance ${d.name}${how}. ${s.chain.length > 1 ? 'En réponse sur la pile.' : 'Sur la pile : l’adversaire peut réagir.'}`);
+        for (const u of mineOnBoard(s, p)) trigger(s, u, 'playSpell', p, null);
         return null;
       }
       // units enter exhausted unless Accelerate was paid or the card says "I enter ready"; gear enters ready at base
@@ -819,6 +882,7 @@ function act(s, a, who) {
       log(s, `✦ ${seatName(s, p)} joue ${d.name}${how}.`);
       if (toBf != null && d.type === 'Unit') arrive(s, toBf, p);
       if (s.showdown && s.showdown.last === p) s.showdown.focus = other(p);
+      if (d.type === 'Unit') for (const u of mineOnBoard(s, p)) if (u !== c) trigger(s, u, 'playUnit', p, null);
       // play effects: everything for the AI (a.targets / a.bf pre-select its choices); for a human, only
       // what the opponent must decide or reveal (discard, kill one of their units, reveal their hand)
       const bfAt = toBf != null && d.type === 'Unit' ? toBf : null;
@@ -842,7 +906,8 @@ function act(s, a, who) {
     case 'chainResolve': { // resolve the top stack item (its owner, once the opponent had the chance to react)
       const top = s.chain && s.chain[s.chain.length - 1];
       if (!top) return 'La pile est vide';
-      if (top.cb.by === who && !top.cb.seen && auto(s, other(who))) return `${seatName(s, other(who))} réfléchit à une réponse…`;
+      if (top.cb.by !== who) return 'Ce sort n’est pas le vôtre : laissez-le résoudre (ou répondez).';
+      if (!top.cb.seen && auto(s, other(who))) return `${seatName(s, other(who))} réfléchit à une réponse…`;
       if (a.apply === false) top.cb.apply = false;
       return resolveTop(s);
     }
@@ -882,6 +947,31 @@ function act(s, a, who) {
       if (auto(s, who) && !pay(s, who, cost)) return `Pas assez de runes pour équiper (${costText(cost)}).`;
       g.c.att = u.c.iid;
       log(s, `${W} équipe ${name(s, u.c)} de ${name(s, g.c)} (+${cd(s, g.c).might || 0} force).`);
+      return null;
+    }
+    case 'activate': { // "<cost>, :rb_exhaust:: <effect>" of a unit, gear or legend you control
+      const f = find(s, a.iid);
+      if (!f || !['base', 'bf', 'legend'].includes(f.zone) || f.p !== who) return 'carte introuvable';
+      const d = cd(s, f.c), ab = R.abilities(d)[a.k || 0], pl = s.players[who];
+      if (!ab) return `${d.name} n’a pas de capacité à activer`;
+      if (f.c.ex) return `${d.name} est épuisé : redressez-le d’abord.`;
+      if (ab.level && (pl.xp || 0) < ab.level) return `Capacité disponible à partir de ${ab.level} XP.`;
+      const busy = (s.chain && s.chain.length) || s.showdown;
+      if (s.chain && s.chain.length && !ab.reaction) return 'Seules les capacités [Reaction] répondent à la pile.';
+      if (!ab.reaction && !(ab.action && (who === s.active || s.showdown)) && (who !== s.active || busy)) return 'Cette capacité s’active pendant votre tour, hors affrontement.';
+      if (auto(s, who)) {
+        if (ab.xp && (pl.xp || 0) < ab.xp) return `Il faut ${ab.xp} XP.`;
+        if ((ab.cost.e || ab.cost.p.length) && !pay(s, who, ab.cost)) return `Pas assez de runes (${costText(ab.cost)}).`;
+      }
+      if (ab.xp) pl.xp = Math.max(0, (pl.xp || 0) - ab.xp);
+      f.c.ex = true;
+      log(s, `⚡ ${W} active ${d.name} : ${ab.text.replace(/:rb_energy_(\d+):/g, '$1 énergie').replace(/:rb_rune_rainbow:/g, '1 puissance au choix').replace(/:rb_rune_(\w+):/g, '1 puissance $1').replace(/:rb_might:/g, 'force')}`);
+      const tg = (Array.isArray(a.targets) ? a.targets : []).filter(id => typeof id === 'string' && find(s, id));
+      (s.fxPre || (s.fxPre = {}))[f.c.iid] = tg;
+      if (tg.length) (s.fxDeclared || (s.fxDeclared = {}))[f.c.iid] = true;
+      s.fxQueue = [...(s.fxQueue || []), ...ab.fx.map(e => ({ ...e, by: who, card: d.name, src: f.c.iid, bfAt: f.zone === 'bf' ? f.bf : null, preBf: a.bf }))];
+      if (ab.kill) { kill(s, f); syncCtrl(s); }
+      runFx(s);
       return null;
     }
     case 'unequip': { const g = find(s, a.iid); if (!g) return 'carte introuvable'; g.c.att = null; log(s, `${W} détache ${name(s, g.c)}.`); return null; }
