@@ -959,9 +959,9 @@ function renderHud() {
     ...(pre ? [] : [
       B('Jeton', e => tokenMenu(e), 'J', '', 'Créer des jetons dans votre base (clic droit sur un champ de bataille pour les y créer)'),
       h('div', { class: 'sep' }),
-      B('↶', () => send({ type: 'undo' }), '', '', 'Annuler la dernière action (Ctrl+Z)'),
       B('🎲', () => send({ type: 'roll', sides: 6 }), '', '', 'Lancer un dé')]),
     h('div', { class: 'grow' }),
+    pre ? '' : undoBtn(),
     autoBtn(),
     muteBtn(),
     v.mode === 'ai' ? '' : h('span', { class: 'roomtag', title: 'Tag de la partie' }, `Tag ${v.room}`),
@@ -970,11 +970,18 @@ function renderHud() {
 
 function endTurn() { send({ type: 'endTurn' }); }
 // "Mode auto": off = you do everything by hand; on = draw, ready, channel, points, combat, payments and card effects are automatic
+// rollback: back to before my last action (what the AI played since is undone too)
+function undoBtn() {
+  const ok = !!S.v.canUndo;
+  return h('button', { class: 'undobtn', disabled: !ok, title: 'Annuler ma dernière action (Ctrl+Z). Ce que l’adversaire a joué depuis est annulé aussi.', onclick: undo },
+    h('span', { class: 'ic' }, '↶'), h('span', { class: 'lbl' }, 'Annuler'));
+}
+function undo() { send({ type: 'undo', mine: true }); }
 function autoBtn() {
   const on = !!(S.v.auto || {})[S.me];
   return h('button', { class: 'autosw' + (on ? ' on' : ''), title: on ? 'Mode auto activé : pioche, redressement, canalisation, points, combats, paiements et effets des cartes sont automatiques. Cliquez pour tout faire à la main.' : 'Mode manuel : vous faites tout à la main. Cliquez pour tout automatiser.',
     onclick: () => { store.set('auto', !on); S.autoSync = S.room + !on; send({ type: 'setAuto', on: !on }); } },
-    h('span', { class: 'sw' }, h('i')), 'Mode auto');
+    h('span', { class: 'sw' }, h('i')), h('span', { class: 'md' }, 'Mode '), 'auto');
 }
 // bottom docks: draw / channel on the left, ready all / end turn on the right
 function renderDocks() {
@@ -1401,7 +1408,7 @@ window.addEventListener('keydown', e => {
   if (e.target.matches('input, textarea')) { if (e.key === 'Escape') e.target.blur(); return; }
   const k = e.key, iid = S.hover && locate(S.hover) ? S.hover : null;
   const L = iid && locate(iid), o = L && (L.c.owner || L.p);
-  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'z') { e.preventDefault(); return send({ type: 'undo' }); }
+  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'z') { e.preventDefault(); return undo(); }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (k === 'Escape') { hideMenu(); closeModal(); S.sel = null; if (S.cast) aimEnd(); return; }
   if (k === 'Enter') { e.preventDefault(); return $('#chat-in').focus(); }

@@ -444,6 +444,19 @@ assert.equal(s.bfs[1].ctrl, 'p2', 'undo restores the combat');
     assert.deepEqual([t.bfs[0].units.p2.map(c => c.dmg), t.bfs[1].units.p2[0].dmg], [[1, 1], 0]);
   }
 }
+{ // undo 'mine': back to before my own last action, the opponent's moves since included
+  const t = newGame(deck('B1'), deck('B2'), cards);
+  pregame(t, { p1: () => [], p2: () => [] });
+  const me = t.active, op = other(me), hand = t.players[me].zones.hand.length;
+  assert.equal(g.apply(t, { type: 'draw', seat: me, n: 1 }), null);
+  assert.equal(g.apply(t, { type: 'endTurn', seat: me }), null);
+  assert.equal(g.apply(t, { type: 'draw', seat: op, n: 1 }), null);
+  assert.equal(t.active, op);
+  assert.equal(g.apply(t, { type: 'undo', seat: me, mine: true }), null);
+  assert.equal(t.active, me, 'back to my turn'); assert.equal(t.players[me].zones.hand.length, hand + 1, 'my draw is kept');
+  assert.equal(g.apply(t, { type: 'undo', seat: me, mine: true }), null);
+  assert.equal(t.players[me].zones.hand.length, hand, 'then my draw is undone');
+}
 console.log('reducer OK');
 
 /* ---- AI vs AI on real data ---- */

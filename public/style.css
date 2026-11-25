@@ -686,3 +686,16 @@ body.dragging-hidden .bf .bfhidden.me:empty::after { content: '?'; margin: auto;
   100% { box-shadow: 0 0 0 3px var(--teal), 0 0 30px #4fe8d888; }
 }
 @media (prefers-reduced-motion: reduce) { .pg-cards .card.fresh, .pg-cards .card.fresh .in { animation: none; } }
+
+/* rollback button, next to "Mode auto" */
+.undobtn { display: inline-flex; align-items: center; gap: 6px; background: none; border: 1px solid var(--line2); border-radius: 16px; padding: 4px 12px 4px 8px; color: var(--mut); font: 600 13px var(--f-cond); letter-spacing: .06em; text-transform: uppercase; cursor: pointer; transition: color .25s, border-color .25s, background .25s; }
+.undobtn .ic { font-size: 16px; line-height: 1; transition: transform .35s var(--ease); }
+.undobtn:hover:not(:disabled) { color: var(--gold2); border-color: var(--gold3); background: #f5c84b14; }
+.undobtn:hover:not(:disabled) .ic { transform: rotate(-50deg); }
+.undobtn:active:not(:disabled) .ic { transform: rotate(-360deg); }
+.undobtn:disabled { opacity: .35; cursor: default; }
+/* narrow windows: the top bar keeps the rollback and auto buttons on screen */
+@media (max-width: 1400px) {
+  .hud .score .pips { display: none; }
+  .undobtn { padding: 4px 9px; } .undobtn .lbl, .autosw .md { display: none; }
+}

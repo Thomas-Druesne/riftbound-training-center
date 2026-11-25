@@ -716,9 +716,9 @@ function mullEnd(s) {
   return null;
 }
 
-function snapshot(s) {
+function snapshot(s, by) {
   const { history, ...rest } = s;
-  s.history.push(JSON.stringify(rest));
+  s.history.push(JSON.stringify({ ...rest, _by: by })); // _by: who acted right after this snapshot
   if (s.history.length > HISTORY_MAX) s.history.shift();
 }
 
@@ -752,9 +752,16 @@ function apply(s, a) {
   if (s.stage !== 'main') { const e = pregame(s, a, who); if (!e) s.rev++; return e; }
 
   if (a.type === 'undo') {
-    const prev = s.history.pop();
+    // a.mine: go back to before this player's own last action (undoing the opponent's moves made since)
+    let prev = null;
+    if (a.mine) {
+      const i = s.history.map(x => JSON.parse(x)._by).lastIndexOf(who);
+      if (i < 0) return 'Rien à annuler';
+      prev = s.history[i]; s.history.length = i;
+    } else prev = s.history.pop();
     if (!prev) return 'Rien à annuler';
     const h = s.history, st = JSON.parse(prev);
+    delete st._by;
     for (const k of Object.keys(s)) if (!(k in st)) delete s[k]; // e.g. a showdown opened after the snapshot
     Object.assign(s, st, { history: h });
     log(s, `${seatName(s, who)} annule la dernière action.`);
@@ -766,7 +773,7 @@ function apply(s, a) {
     const q = s.pending;
     return `En attente : ${seatName(s, q.to)} doit ${q.kind === 'discard' ? `défausser ${q.n} carte${q.n > 1 ? 's' : ''}` : q.kind === 'sacrifice' ? 'détruire une unité' : 'faire un choix'} (${q.card}).`;
   }
-  snapshot(s);
+  snapshot(s, who);
   const err = act(s, a, who);
   if (err) s.history.pop();
   else s.rev++;
