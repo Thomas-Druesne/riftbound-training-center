@@ -699,3 +699,49 @@ body.dragging-hidden .bf .bfhidden.me:empty::after { content: '?'; margin: auto;
   .hud .score .pips { display: none; }
   .undobtn { padding: 4px 9px; } .undobtn .lbl, .autosw .md { display: none; }
 }
+
+/* hands out of the way: the opponent's hand peeks from under the top bar (right side), mine sits next to
+   "Redresser tout / Fin de tour" without covering the rune row */
+.hud { position: relative; z-index: 9; background: #050b14; }
+.handwrap.op { z-index: 4; left: auto; right: 20px; transform: none; }
+.hand.op .card .in { transform: translateY(-56%); }
+.handwrap.mine { margin-top: 0; }
+.hand.mine { justify-content: flex-end; padding-right: 330px; padding-left: 330px; }
+/* face-down card on a battlefield: "Cachée" label, nothing else */
+.badge.hid { background: #0d1a2a; color: var(--gold2); border: 1px solid var(--gold3); letter-spacing: .08em; }
+
+/* end of game + match score */
+.modal .endbox { width: min(560px, 92vw); text-align: center; padding: 30px 28px 24px; }
+.endbox .end-kicker { font: 600 12px var(--f-cond); letter-spacing: .2em; text-transform: uppercase; color: var(--mut); }
+.endbox h2 { font-family: var(--f-title); font-size: 44px; margin: 6px 0 4px; color: var(--gold2); text-shadow: 0 0 28px #f5c84b55; }
+.endbox.lose h2 { color: #d9a3ad; text-shadow: 0 0 28px #e0607055; }
+.endbox p { color: var(--mut); margin: 6px 0; }
+.endbox .end-score { display: flex; justify-content: center; align-items: baseline; gap: 16px; margin: 14px 0 6px; font: 600 14px var(--f-cond); letter-spacing: .08em; text-transform: uppercase; color: var(--mut); }
+.endbox .end-score b { font: 700 34px var(--f-title); color: var(--txt, #e8eef5); }
+.endbox .end-match { color: var(--gold2); font-weight: 600; }
+.endbox .end-wait { color: var(--teal, #4fd1c5); }
+.endbox .end-actions { justify-content: center; flex-wrap: wrap; margin-top: 22px; }
+/* sideboarding */
+.modal .sideboard { width: min(1180px, 96vw); max-height: 92vh; }
+.sideboard .sb-help { color: var(--mut); margin: 0 0 12px; }
+.sideboard .sb-cols { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+.sideboard .sb-col { border: 1px solid var(--line2); border-radius: 6px; padding: 10px 12px; background: #0006; min-height: 200px; }
+.sideboard .sb-col.bad { border-color: #e06070; }
+.sideboard h4 { display: flex; justify-content: space-between; margin: 0 0 10px; font: 600 13px var(--f-cond); letter-spacing: .14em; text-transform: uppercase; color: var(--gold2); }
+.sideboard .sb-col.bad h4 span { color: #f0a0b0; }
+.sideboard .sb-grid { display: flex; flex-wrap: wrap; gap: 8px; --cw: 78px; max-height: 58vh; overflow: auto; padding: 2px; }
+.sideboard .sb-grid .card { cursor: pointer; position: relative; transition: transform .2s var(--ease); }
+.sideboard .sb-grid .card:hover { transform: translateY(-4px); }
+.sideboard .sb-n { position: absolute; right: 3px; bottom: 3px; background: #000c; color: var(--gold2); font: 700 12px var(--f-cond); padding: 1px 6px; border-radius: 8px; z-index: 2; }
+
+/* options: language + sound volumes */
+.mute.opt.fixed { right: 54px; }
+.modal .options { width: min(560px, 92vw); }
+.options .opt-row { display: grid; grid-template-columns: 1fr 170px 52px; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line2); }
+.options .opt-row:has(.opt-lang) { grid-template-columns: 1fr auto; }
+.options .opt-row span { display: block; color: var(--txt, #e8eef5); font-weight: 600; }
+.options .opt-row small { color: var(--mut); font-size: 12px; }
+.options .opt-row b { color: var(--gold2); font: 600 13px var(--f-cond); text-align: right; }
+.options input[type=range] { accent-color: var(--gold); width: 100%; }
+.options .opt-lang { display: flex; gap: 8px; }
+.options .opt-mute { display: flex; gap: 8px; align-items: center; margin-top: 14px; color: var(--mut); cursor: pointer; }

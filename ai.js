@@ -1,6 +1,12 @@
 // Riftbound AI. Plays through the same actions as a human (play / move / fight / damage...).
-// Levels: easy = beginner (random, wasteful), normal = confirmed (greedy, sound trades),
-// hard = pro (exhaustive search of attacks with a look-ahead on the opponent's reply, optimal spending).
+// Engine profiles: easy (random, wasteful; no longer offered), normal (greedy, sound trades), hard (exhaustive
+// search of attacks, optimal spending), pro (hard + the opponent's best reply among several, stricter card economy,
+// sharper tricks and counters). Menu levels map onto them: easy -> normal, normal -> hard, hard -> pro (PROFILE).
+const PROFILE = { easy: 'normal', normal: 'hard', hard: 'pro' };
+const hardish = l => l === 'hard' || l === 'pro';
+// the turn plan chosen by the pro's look-ahead (see planTurn): flags read by phaseMain / phaseAttack
+let PLAN = {};
+let SIM = 0; // > 0 while the pro simulates (no look-ahead inside a look-ahead)
 // Limits: only keyword/simple effects are understood (see rules.js); other card text is ignored.
 const R = require('./rules');
 const G = require('./game');
@@ -86,7 +92,12 @@ function evaluate(m, me) {
   for (const p of [me, op]) for (const u of allUnits(t, p)) { u.dmg = 0; u.stun = false; if (p === op) u.ready = true; }
   for (const b of t.bfs) if (b.ctrl === op) t.score[op]++;
   if (t.score[op] >= t.win) return -1e6;
-  applyMoves(t, op, greedyAttack(t, op));
+  if (m.pro) { // the reply that hurts me most: greedy, all-in on one battlefield, or nothing
+    const replies = [greedyAttack(t, op), ...t.bfs.map((b, i) => t.base[op].filter(u => u.ready && u.m > 0).map(u => ({ iid: u.iid, to: i })))];
+    let worst = null;
+    for (const r of replies) { const u = clone(t); applyMoves(u, op, r); const k = 10 * (u.score[op] - u.score[me]) + 0.6 * (mightOf(u, op) - mightOf(u, me)) + u.bfs.filter(b => b.ctrl === op).length * 3; if (!worst || k > worst.k) worst = { k, u }; }
+    Object.assign(t, worst.u);
+  } else applyMoves(t, op, greedyAttack(t, op));
   if (t.score[op] >= t.win) return -1e6 + t.score[me];
   let ctrl = 0;
   for (const b of t.bfs) { if (b.ctrl === me) { t.score[me]++; ctrl++; } else if (b.ctrl === op) ctrl--; }
@@ -95,20 +106,22 @@ function evaluate(m, me) {
 }
 
 // Hard: try every assignment of up to 7 ready base units to {stay, battlefield 1..n}.
-function searchAttack(m, me) {
+function searchAttack(m, me, top) {
   const movers = m.base[me].filter(u => u.ready && u.m > 0).sort((a, b) => hpA(b) - hpA(a)).slice(0, 7);
   const nb = m.bfs.length, opts = nb + 1;
   let best = { v: evaluate(m, me), moves: [] };
+  const list = [best]; // top: the best few assignments, for the pro's look-ahead
   const total = opts ** movers.length;
   for (let code = 1; code < total; code++) {
     const moves = [];
     for (let k = 0, c = code; k < movers.length; k++, c = Math.floor(c / opts)) { const o = c % opts; if (o) moves.push({ iid: movers[k].iid, to: o - 1 }); }
     const t = clone(m);
     applyMoves(t, me, moves);
-    const v = evaluate(t, me) - moves.length * 0.01; // prefer fewer moves on ties
+    const v = evaluate(t, me) - moves.length * 0.01 + (m.aggro ? 4 * (t.score[me] - m.score[me]) : 0); // prefer fewer moves on ties
     if (v > best.v) best = { v, moves };
+    if (top && (list.length < top || v > list[list.length - 1].v)) { list.push({ v, moves }); list.sort((a, b) => b.v - a.v); list.length = Math.min(list.length, top); }
   }
-  return best.moves;
+  return top ? list : best.moves;
 }
 
 /* ---------------- resources ---------------- */
@@ -156,7 +169,7 @@ function phaseRemoval(s, me, level, pool) {
       let pick = null;
       if (level === 'easy') pick = (Math.random() < 0.6 ? tg : ok)[rnd(Math.max(1, (Math.random() < 0.6 ? tg : ok).length))];
       else pick = ok.sort((a, b) => val(b) - val(a))[0];
-      if (level === 'hard' && pick && val(pick) < 2) pick = null; // don't waste removal on chaff
+      if (hardish(level) && pick && val(pick) < 2) pick = null; // don't waste removal on chaff
       if (pick) { killed.add(pick.c.iid); fx = [sp.fx.kind === 'kill' ? { type: 'kill', iid: pick.c.iid } : { type: 'damage', iid: pick.c.iid, n: sp.fx.n }]; }
     }
     if (!fx.length) continue;
@@ -255,7 +268,11 @@ function phaseAttack(s, me, level) {
   let moves;
   if (level === 'easy') {
     moves = m.base[me].filter(u => u.ready && u.m > 0 && Math.random() < 0.45).map(u => ({ iid: u.iid, to: rnd(m.bfs.length) }));
-  } else moves = searchAttack(m, me);
+  } else if (PLAN.noAttack) moves = [];
+  else { m.pro = level === 'pro'; m.aggro = !!PLAN.aggro; moves = level === 'pro' && !SIM ? proAttack(s, me, m) : searchAttack(m, me); }
+  return movesToActs(s, me, moves);
+}
+function movesToActs(s, me, moves) {
   const acts = [];
   const byBf = {};
   for (const mv of moves) (byBf[mv.to] = byBf[mv.to] || []).push(mv.iid);
@@ -288,7 +305,8 @@ function tvMain(s, me, e, id, sim) {
   switch (e.op) {
     case 'dmg': case 'dmgSplash':
       if (e.n >= left) { sim.gone.add(id); return sign * w; }
-      sim.dmg.set(id, (sim.dmg.get(id) || 0) + e.n); return sign * 0.15 * e.n;
+      // damage that doesn't kill is gone at the end of the turn: almost worthless outside combat
+      sim.dmg.set(id, (sim.dmg.get(id) || 0) + e.n); return sign * 0.04 * e.n;
     case 'kill': sim.gone.add(id); return sign * w;
     case 'hand': sim.gone.add(id); return sign * w * (G.cd(s, c).supertype === 'Token' ? 1 : 0.6);
     case 'deck': sim.gone.add(id); return sign * w * 0.9;
@@ -406,6 +424,7 @@ function phaseMain(s, me, level) {
     const d = G.cd(s, c), fromHid = hiddenMine.some(x => x.c === c);
     if (!['Unit', 'Gear', 'Spell'].includes(d.type)) continue;
     if (d.type === 'Spell' && !R.playFx(d).length) continue; // effect not understood: not cast
+    if (d.type === 'Spell' && PLAN.noSpell) continue;
     const plan = fxPlan(s, me, d, c.iid);
     let v = plan.v;
     if (d.type === 'Unit') v += bodyValue(d);
@@ -414,7 +433,9 @@ function phaseMain(s, me, level) {
       if (plan.fx.every(e => e.kind === 'target' && COMBAT_OPS.includes(e.op))) continue; // combat trick: kept for a showdown
       const k = R.kw(d.text);
       if ((k.reaction || k.action) && plan.fx.some(e => e.kind === 'target' && COMBAT_OPS.includes(e.op))) v -= 1.5;
-      if (v < (level === 'hard' ? 1.2 : 1.5)) continue;
+      // a spell costs a card and its runes: no removal on chaff, no two cards to kill one unit
+      if (plan.fx.some(e => e.kind === 'target' && e.side !== 'friendly')) v -= (level === 'pro' ? 0.9 : 0.6) + 0.12 * ((d.energy || 0) + (d.power || 0));
+      if (v < (level === 'pro' ? 1 : hardish(level) ? 1.2 : 1.5)) continue;
     }
     cands.push({ c, d, v, plan, cost: fromHid ? FREE : costOf(d), pri: d.type === 'Spell' && plan.targets.some(id => { const f = G.find(s, id); return f && f.p === op; }) ? 0 : d.type === 'Unit' ? 1 : 2 });
   }
@@ -429,7 +450,7 @@ function phaseMain(s, me, level) {
     const plan = fxPlan(s, me, x.d, x.c.iid);
     if (plan.fx.every(e => e.kind === 'target' && COMBAT_OPS.includes(e.op))) continue;
     let v = plan.v - (x.ab.kill ? worth(s, x.c) : 0) - (x.owner.type === 'Unit' ? 1.5 : 0);
-    if (v < (level === 'hard' ? 1 : 1.3)) continue;
+    if (v < (hardish(level) ? 1 : 1.3)) continue;
     cands.push({ c: x.c, d: x.d, v, plan, cost: x.ab.cost, ability: x.ab.i, pri: 2 });
   }
   if (!cands.length) return [];
@@ -475,7 +496,7 @@ function phaseMain(s, me, level) {
 function pregame(s, me, level) {
   if (s.stage === 'bf' && !s.bfPick[me]) { const o = s.bfOpts[me]; return { type: 'chooseBf', cid: o[rnd(o.length)] }; }
   if (s.stage === 'dice' && s.dice.caller === me) return s.dice.call ? null : { type: 'callParity', parity: Math.random() < 0.5 ? 'pair' : 'impair' };
-  if (s.stage === 'mulligan' && !s.players[me].mullDone) return { type: 'mulligan', iids: mulligan(s, me, level) };
+  if (s.stage === 'mulligan' && !s.players[me].mullDone) return { type: 'mulligan', iids: mullPick(s, me, level) };
   return null;
 }
 
@@ -616,7 +637,7 @@ function combatTrick(s, me, level, reactionOnly) {
   if (!opts.length) return null;
   if (level === 'easy') return Math.random() < 0.35 ? opts[rnd(opts.length)].act : null;
   const best = opts.sort((a, b) => b.v - a.v)[0];
-  return best.v - base >= (level === 'hard' ? 0.5 : 0.8) ? best.act : null;
+  return best.v - base >= (level === 'pro' ? 0.4 : hardish(level) ? 0.5 : 0.8) ? best.act : null;
 }
 // Apply one effect to the showdown model (battlefield i). Returns false if it can't target that unit.
 function simFx(t, i, me, e, id) {
@@ -693,7 +714,7 @@ function react(s, me, level, top) {
   const tp = d.power || 0, te = d.energy || 0;
   const counter = cards.find(x => x.d.type === 'Spell' && R.playFx(x.d).some(e => e.kind === 'counter' && !(e.maxE != null && te > e.maxE) && !(e.maxP != null && tp > e.maxP) && !(e.minP != null && tp < e.minP) && !(e.mine && !th.hit)));
   if (counter) {
-    const go = level === 'easy' ? Math.random() < 0.25 : th.v >= (level === 'hard' ? 2 : 2.5);
+    const go = level === 'easy' ? Math.random() < 0.25 : th.v >= (level === 'pro' ? 1.6 : hardish(level) ? 2 : 2.5);
     if (go) return { type: 'play', iid: counter.c.iid };
   }
   if (th.hit && level !== 'easy') { // save the unit: buff it out of reach, or blink / recall it
@@ -710,7 +731,78 @@ function react(s, me, level, top) {
   return s.showdown ? combatTrick(s, me, level, true) : null;
 }
 
-function next(s, me, level, mem) {
+function next(s, me, menuLevel, mem) { return nextP(s, me, PROFILE[menuLevel] || menuLevel, mem); }
+function nextP(s, me, level, mem) {
+  const prev = PLAN;
+  PLAN = mem.plan && mem.planTurn === s.turn && s.active === me ? mem.plan : {};
+  try { return step(s, me, level, mem); } finally { PLAN = prev; }
+}
+// --- pro look-ahead ---
+const VARIANTS = [{}, { noAttack: 1 }, { noSpell: 1 }, { aggro: 1 }, { noSpell: 1, aggro: 1 }];
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+// a copy of the game where what I can't see (opponent's hand, both decks' order) is guessed at random
+function guess(s, me) {
+  const { history, log, ...rest } = s, c = structuredClone(rest), op = other(me);
+  c.history = []; c.log = [];
+  const zo = c.players[op].zones, all = shuffle([...zo.hand.filter(x => !x.rev), ...zo.main]), k = zo.hand.filter(x => !x.rev).length;
+  zo.hand = [...zo.hand.filter(x => x.rev), ...all.slice(0, k)]; zo.main = all.slice(k);
+  shuffle(c.players[me].zones.main);
+  return c;
+}
+function evalState(s, me) {
+  const op = other(me);
+  if (s.winner) return s.winner === me ? 1000 : -1000;
+  const P = s.players, might = p => unitsAll(s, p).reduce((a, c) => a + G.hp(s, c), 0);
+  const near = p => Math.max(0, P[p].score - s.winScore + 4) ** 2; // the last points weigh more
+  return 10 * (P[me].score - P[op].score) + 2 * (near(me) - near(op)) + 2.5 * s.bfs.reduce((a, b) => a + (b.ctrl === me) - (b.ctrl === op), 0)
+    + 0.6 * (might(me) - might(op)) + 0.8 * (P[me].zones.hand.length - P[op].zones.hand.length) + 0.3 * (G.runesOf(s, me).length - G.runesOf(s, op).length);
+}
+// play my turn with a plan, the opponent's turn, then my next turn (both sides 'hard'), and score the result
+// the best few attacks, each played out on guessed copies of the game
+function proAttack(s, me, m) {
+  const cands = searchAttack(m, me, 4);
+  if (cands.length < 2) return cands[0] ? cands[0].moves : [];
+  const guesses = Array.from({ length: 5 }, () => guess(s, me));
+  let best = null;
+  for (const cand of cands) {
+    let v = 0;
+    for (const g0 of guesses) {
+      const c = structuredClone(g0);
+      for (const a of movesToActs(c, me, cand.moves)) G.apply(c, { ...a, seat: me, p: me });
+      v += rollout(c, me, { turn: c.turn, phase: 4, q: [], main: 99, att: 1 }, PLAN);
+    }
+    v /= guesses.length;
+    if (!best || v > best.v + 0.01) best = { v, moves: cand.moves };
+  }
+  return best.moves;
+}
+function rollout(c, me, mem, plan) {
+  SIM++;
+  try { return rolloutRun(c, me, mem, plan); } finally { SIM--; }
+}
+function rolloutRun(c, me, mem, plan) {
+  const t0 = c.turn, mems = { [me]: { ...structuredClone(mem), plan, planTurn: t0, sim: true }, [other(me)]: { sim: true } };
+  for (let n = 0; n < 900 && !c.winner && c.turn < t0 + 3; n++) {
+    let p = c.active, a = nextP(c, p, 'hard', mems[p]);
+    if (!a) { p = other(p); a = nextP(c, p, 'hard', mems[p]); }
+    if (!a) break;
+    if (G.apply(c, { ...a, seat: p, p })) { mems[p].q = []; if ((mems[p].err = (mems[p].err || 0) + 1) > 20) { G.apply(c, { type: 'endTurn', seat: p, p }); mems[p].err = 0; } }
+    if (c.history.length > 40) c.history.length = 0;
+  }
+  return evalState(c, me);
+}
+function planTurn(s, me, mem) {
+  const key = me + '|' + s.turn + '|' + s.rev; // the server looks once before acting: same position, same plan
+  if (planTurn.key === key) { mem.plan = planTurn.plan; mem.planTurn = s.turn; return; }
+  const guesses = Array.from({ length: 6 }, () => guess(s, me));
+  let best = null;
+  for (const plan of VARIANTS) {
+    const v = guesses.reduce((a, c) => a + rollout(structuredClone(c), me, mem, plan), 0) / guesses.length;
+    if (!best || v > best.v + 0.01) best = { v, plan };
+  }
+  mem.plan = best.plan; mem.planTurn = s.turn; planTurn.key = key; planTurn.plan = best.plan;
+}
+function step(s, me, level, mem) {
   if (s.phase !== 'playing' || s.winner) return null;
   if (s.pending) return s.pending.to === me ? answer(s, me, level) : null; // otherwise wait for the human
   if (s.stage !== 'main') return pregame(s, me, level);
@@ -733,6 +825,7 @@ function next(s, me, level, mem) {
   if (mem.q.length) return mem.q.shift();
   const phases = [
     () => (s.started !== s.turn ? [{ type: 'startTurn' }] : []),
+    () => { if (level === 'pro' && !mem.sim && mem.planTurn !== s.turn) { planTurn(s, me, mem); PLAN = mem.plan; } return []; },
     ...(level === 'easy' ? [
       () => phaseRemoval(s, me, level, (mem.pool = runePool(s, me))),
       () => phaseDraw(s, me, level, runePool(s, me)),
@@ -749,13 +842,14 @@ function next(s, me, level, mem) {
   return null;
 }
 
-function mulligan(s, me, level) {
+function mullPick(s, me, level) {
   if (level === 'easy') return [];
   const hand = s.players[me].zones.hand.map(c => ({ c, e: G.cd(s, c).energy || 0 })).sort((a, b) => b.e - a.e);
-  const limit = level === 'hard' ? 5 : 6;
+  const limit = level === 'pro' ? 4 : hardish(level) ? 5 : 6;
   const out = hand.filter(x => x.e >= limit).slice(0, 2);
-  if (level === 'hard' && !hand.some(x => x.e <= 2) && out.length < 2) { const x = hand.find(y => !out.includes(y)); if (x) out.push(x); }
+  if (hardish(level) && !hand.some(x => x.e <= 2) && out.length < 2) { const x = hand.find(y => !out.includes(y)); if (x) out.push(x); }
   return out.map(x => x.c.iid);
 }
 
-module.exports = { next, mulligan, _test: { model, applyMoves, greedyAttack, searchAttack, evaluate, phaseMain, fxPlan, react, trickPlan } };
+const mulligan = (s, me, menuLevel) => mullPick(s, me, PROFILE[menuLevel] || menuLevel);
+module.exports = { next, mulligan, PROFILE, _test: { model, applyMoves, greedyAttack, searchAttack, evaluate, phaseMain, fxPlan, react, trickPlan } };

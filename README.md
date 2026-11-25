@@ -1,6 +1,8 @@
 # Riftbound Training Center
 
-Simulateur local du jeu de cartes Riftbound : partie contre une IA (adversaire débutant / adversaire confirmé / Pro Player) ou contre un joueur (même PC ou réseau local).
+Simulateur local du jeu de cartes Riftbound : partie contre une IA (adversaire débutant / adversaire confirmé / Pro Player) ou contre un joueur (même PC ou réseau local), en BO1 ou en BO3 avec sideboard entre les manches. Interface en français ou en anglais (Options ⚙, avec les volumes des sons).
+
+Niveaux de l'IA : le débutant joue de façon gloutonne, le confirmé cherche la meilleure attaque et dépense ses runes au mieux, le Pro Player simule en plus chaque tour (plusieurs plans de tour et plusieurs attaques, joués deux tours plus loin sur des copies de la partie où la main adverse est tirée au hasard) et garde le meilleur.
 
 ## Lancer
 
@@ -52,7 +54,7 @@ navigateur. Échoue si la partie s'arrête de bouger. À lancer après toute mod
 | `game.js` | Moteur de jeu (actions, pile, affrontements, combat, effets) |
 | `rules.js` | Lecture des textes de cartes : mots-clés, coûts, effets (`CARD_FX` pour les cartes écrites à la main) |
 | `ai.js` | IA |
-| `public/` | Interface (`app.js`, `style.css`, `index.html`) |
+| `public/` | Interface (`app.js`, `style.css`, `index.html`, `i18n.js` : traduction anglaise) |
 | `data/cards.json` | Cache des cartes (rechargeable depuis l'interface) |
 | `data/decks.json` | Decks |
 | `assets/` | Logo, icône, source du lanceur `.exe` |

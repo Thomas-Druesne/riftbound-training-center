@@ -113,7 +113,7 @@ function kill(s, f) {
 }
 const mineOnBoard = (s, p) => [...s.players[p].zones.base, ...s.players[p].zones.legend, ...s.bfs.flatMap(b => b.units[p])];
 // A unit's triggered ability: its effects are queued like play effects (choices become prompts).
-const EV = { attack: 'attaque', defend: 'défend', conquer: 'conquête', hold: 'tient', move: 'déplacement', deathknell: 'Deathknell', playSpell: 'sort joué', playUnit: 'unité jouée', allyDies: 'unité alliée détruite' };
+const EV = { attack: 'attaque', defend: 'défend', conquer: 'conquête', hold: 'tient', move: 'déplacement', deathknell: 'à sa mort (Deathknell)', playSpell: 'sort joué', playUnit: 'unité jouée', allyDies: 'unité alliée détruite' };
 function trigger(s, c, ev, p, bf) {
   const d = cd(s, c), fx = R.triggerFx(d, ev);
   if (!fx.length) return;
@@ -936,6 +936,14 @@ function act(s, a, who) {
       log(s, `${seatName(s, who)} passe.`);
       if (sd.passes >= 2) { closeShowdown(s); return null; }
       sd.focus = other(who);
+      return null;
+    }
+    case 'look': { // look at the top N cards of my deck (Predict from a battlefield, etc.): recycle any of them
+      if (s.pending) return 'Un choix est déjà en attente.';
+      const n = Math.max(1, Math.min(10, Math.floor(Number(a.n)) || 1)), top = s.players[who].zones.main.slice(0, n);
+      if (!top.length) return 'Votre deck est vide.';
+      s.pending = { kind: 'predict', to: who, n: top.length, by: who, card: 'Prédiction', cards: top.map(c => c.iid) };
+      log(s, `${W} regarde ${top.length > 1 ? `les ${top.length} cartes` : 'la carte'} du dessus de son deck.`);
       return null;
     }
     case 'hide': { // [Hidden] (rule 811): pay 1 Power (any) to put the card face down at a battlefield you control

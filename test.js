@@ -487,6 +487,55 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
   const r2 = { normal: 0, easy: 0, draw: 0 };
   for (let i = 0; i < 10; i++) { const w = play('normal', 'easy'); r2[w === 'p1' ? 'normal' : w === 'p2' ? 'easy' : 'draw']++; }
   console.log('hard vs easy', res, '| normal vs easy', r2, `| ${Date.now() - t0} ms`);
-  assert.ok(res.hard > res.easy, 'hard should beat easy');
+  // menu levels play profiles normal / hard / pro, close in strength over 10 mirror games (see the bench in the
+  // commit notes): only a collapse is a failure here
+  assert.ok(res.hard >= 3 && res.draw <= 2, 'Pro Player must not collapse against the beginner');
+
+  /* ---- real cards: hiding, blink vs a declared target, looking at the top of the deck ---- */
+  const by = n => all.find(x => x.name === n);
+  const mk = () => {
+    const s = newGame(decks[0], decks[1], all);
+    pregame(s, { p1: () => [], p2: () => [] });
+    for (const n of ['Hextech Ray', 'Thrill of the Hunt', 'Elnuk Herd', 'Rengar, Pridestalker']) s.cd[by(n).id] = by(n);
+    for (const p of ['p1', 'p2']) s.players[p].zones.runes.forEach(r => (r.ex = false));
+    return s;
+  };
+  const card = (s, iid, n, p) => ({ iid, cid: by(n).id, owner: p, ex: false, dmg: 0, buff: 0 });
+  { // hiding a [Hidden] unit is not playing it: "when you play a unit" (Rengar, Pridestalker) stays silent
+    const s = mk(), P = s.active, Z = s.players[P].zones;
+    s.auto = { p1: false, p2: false };
+    Z.legend = [card(s, 'rg', 'Rengar, Pridestalker', P)];
+    const u = Z.main.find(c => g.cd(s, c).type === 'Unit'); Z.main.splice(Z.main.indexOf(u), 1); s.bfs[0].units[P].push(u); s.bfs[0].ctrl = P;
+    Z.hand.push(card(s, 'el', 'Elnuk Herd', P));
+    const n = s.log.length;
+    assert.equal(g.apply(s, { type: 'hide', seat: P, iid: 'el', bf: 0 }), null);
+    assert.ok(!s.log.slice(n).some(l => /Rengar/.test(l.msg)), 'no trigger when hiding');
+    s.turn++;
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'el' }), null);
+    assert.ok(s.log.some(l => /Rengar, Pridestalker \(unité jouée\)/.test(l.msg)), 'the trigger comes when it is played from face down');
+  }
+  { // Hextech Ray on my unit, I answer with Thrill of the Hunt: the unit is banished and replayed, Ray loses its target
+    const s = mk(), H = 'p1', A = 'p2';
+    s.auto = { p1: false, p2: false }; s.active = A;
+    const Z = s.players[H].zones, u = Z.main.find(c => g.cd(s, c).type === 'Unit');
+    Z.main.splice(Z.main.indexOf(u), 1); u.iid = 'vic'; s.bfs[0].units[H].push(u); s.bfs[0].ctrl = H;
+    s.players[A].zones.hand.push(card(s, 'ray', 'Hextech Ray', A)); Z.hand.push(card(s, 'thr', 'Thrill of the Hunt', H));
+    assert.equal(g.apply(s, { type: 'play', seat: A, iid: 'ray', targets: ['vic'] }), null);
+    assert.equal(g.apply(s, { type: 'play', seat: H, iid: 'thr', targets: ['vic'] }), null);
+    g.apply(s, { type: 'chainPass', seat: A }); g.apply(s, { type: 'chainResolve', seat: H });
+    assert.equal(s.pending && s.pending.kind, 'bf', 'Thrill: choose where it comes back');
+    assert.equal(g.apply(s, { type: 'resolve', seat: H, bf: 1 }), null);
+    g.apply(s, { type: 'chainPass', seat: H }); g.apply(s, { type: 'chainResolve', seat: A });
+    const f = g.find(s, 'vic');
+    assert.ok(f && f.zone === 'bf' && f.bf === 1 && !f.c.dmg, 'Hextech Ray fizzles: the unit was banished and replayed');
+  }
+  { // look at the top N cards of my deck, recycle some
+    const s = mk(), P = s.active, Z = s.players[P].zones, top = Z.main.slice(0, 3).map(c => c.iid);
+    assert.equal(g.apply(s, { type: 'look', seat: P, n: 3 }), null);
+    assert.deepEqual(s.pending.cards, top);
+    assert.deepEqual(g.viewFor(s, other(P)).pending.cards, [], 'the opponent does not see them');
+    assert.equal(g.apply(s, { type: 'resolve', seat: P, iids: [top[0]] }), null);
+    assert.equal(Z.main[Z.main.length - 1].iid, top[0], 'recycled to the bottom');
+  }
 }
 console.log('self-check OK');

@@ -113,8 +113,9 @@ function newTag() {
   while (rooms.has(t));
   return t;
 }
-function makeRoom(mode) {
-  const r = { tag: newTag(), mode, state: game.newState(), clients: new Set(), ai: null, decks: {}, timer: null, seen: Date.now() };
+function makeRoom(mode, bo) {
+  const r = { tag: newTag(), mode, state: game.newState(), clients: new Set(), ai: null, decks: {}, timer: null, seen: Date.now(),
+    match: { bo: bo === 3 ? 3 : 1, wins: { p1: 0, p2: 0 }, game: 1, counted: null, ready: {}, base: {} } };
   rooms.set(r.tag, r);
   return r;
 }
@@ -123,8 +124,40 @@ setInterval(() => {
   for (const r of rooms.values()) if (!r.clients.size && Date.now() - r.seen > 2 * 3600e3) { clearTimeout(r.timer); rooms.delete(r.tag); }
 }, 10 * 60e3).unref();
 function broadcast(r) {
-  const extra = { room: r.tag, mode: r.mode, ai: r.ai && { seat: r.ai.seat, level: r.ai.level } };
-  for (const c of r.clients) c.res.write(`data: ${JSON.stringify({ ...game.viewFor(r.state, c.seat), ...extra })}\n\n`);
+  countWin(r);
+  const m = r.match, extra = { room: r.tag, mode: r.mode, ai: r.ai && { seat: r.ai.seat, level: r.ai.level },
+    match: { bo: m.bo, wins: m.wins, game: m.game, ready: m.ready } };
+  // each player also gets their own current deck list (sideboarding between games)
+  for (const c of r.clients) {
+    const d = r.decks[c.seat], mine = d && { name: d.name, cards: d.cards, base: m.base[c.seat] };
+    c.res.write(`data: ${JSON.stringify({ ...game.viewFor(r.state, c.seat), ...extra, myDeck: mine })}\n\n`);
+  }
+}
+// match score (BO1 / BO3): a game counts once; an undo that removes the win removes it from the score too
+function countWin(r) {
+  const m = r.match, w = r.state.winner || null;
+  if (m.counted === w) return;
+  if (m.counted) m.wins[m.counted]--;
+  if (w) m.wins[w]++;
+  m.counted = w;
+}
+// after sideboarding the deck holds the same cards (main + sideboard) and keeps its main deck size
+const countIds = list => (list || []).reduce((a, x) => ((a[x.id] = (a[x.id] || 0) + x.n), a), {});
+function validSide(base, main, side) {
+  if (!Array.isArray(main) || !Array.isArray(side) || [...main, ...side].some(x => !x || typeof x.id !== 'string' || !Number.isInteger(x.n) || x.n < 1)) return false;
+  const a = countIds([...base.main, ...(base.side || [])]), b = countIds([...main, ...side]);
+  const total = l => l.reduce((t, x) => t + x.n, 0);
+  return total(main) === total(base.main) && Object.keys({ ...a, ...b }).every(id => a[id] === b[id]);
+}
+// next game of the match (or a rematch once the match is over): same seats, decks possibly sideboarded
+async function nextGame(r) {
+  clearTimeout(r.timer); r.timer = null;
+  const seats = r.state.seats, m = r.match;
+  r.state = game.newState(); r.state.seats = seats;
+  if (m.wins.p1 * 2 > m.bo || m.wins.p2 * 2 > m.bo) m.wins = { p1: 0, p2: 0 };
+  m.game++; m.counted = null; m.ready = {};
+  if (r.ai) r.ai.mem = {};
+  await startRoom(r);
 }
 async function startRoom(r) {
   await loadCards(false);
@@ -233,13 +266,13 @@ http.createServer(async (req, res) => {
       const d1 = deckById(a.deckId);
       if (!d1) return json(res, 400, { error: 'Choisissez un deck' });
       const name = String(a.name || '').slice(0, 24) || 'Joueur 1';
-      const r = makeRoom(a.mode === 'ai' ? 'ai' : 'pvp');
+      const r = makeRoom(a.mode === 'ai' ? 'ai' : 'pvp', Number(a.bo));
       r.state.seats.p1 = { name };
       r.humanAuto = { p1: a.auto !== false };
-      r.decks.p1 = d1;
+      r.decks.p1 = d1; r.match.base.p1 = d1.cards;
       if (r.mode === 'pvp') { broadcast(r); return json(res, 200, { tag: r.tag, seat: 'p1' }); }
       const d2 = deckById(a.deckId2) || d1;
-      r.decks.p2 = d2;
+      r.decks.p2 = d2; r.match.base.p2 = d2.cards;
       const level = LEVELS[a.level] ? a.level : 'normal';
       r.ai = { seat: 'p2', level, mem: {}, errors: 0 };
       r.state.seats.p2 = { name: LEVELS[level] };
@@ -255,9 +288,23 @@ http.createServer(async (req, res) => {
       if (!d) return json(res, 400, { error: 'Choisissez un deck' });
       r.state.seats.p2 = { name: String(a.name || '').slice(0, 24) || 'Joueur 2' };
       r.humanAuto = { ...(r.humanAuto || {}), p2: a.auto !== false };
-      r.decks.p2 = d;
+      r.decks.p2 = d; r.match.base.p2 = d.cards;
       await startRoom(r);
       return json(res, 200, { tag: r.tag, seat: 'p2' });
+    }
+    if (p === '/api/room/next' && req.method === 'POST') {
+      // a.main / a.side: the sideboarded deck (optional); the next game starts once every human is ready
+      const a = await body(req), r = rooms.get(a.room), seat = a.seat;
+      if (!r || !['p1', 'p2'].includes(seat) || (r.ai && seat === r.ai.seat)) return json(res, 404, { error: 'Partie introuvable' });
+      if (!r.state.winner) return json(res, 409, { error: 'La partie n’est pas terminée' });
+      if (a.main) {
+        if (!validSide(r.match.base[seat], a.main, a.side || [])) return json(res, 400, { error: 'Deck invalide : échangez carte pour carte entre le deck et le sideboard.' });
+        r.decks[seat] = { ...r.decks[seat], cards: { ...r.decks[seat].cards, main: a.main, side: a.side || [] } };
+      }
+      r.match.ready[seat] = true;
+      const humans = ['p1', 'p2'].filter(p => !(r.ai && p === r.ai.seat));
+      if (humans.every(p => r.match.ready[p])) await nextGame(r); else broadcast(r);
+      return json(res, 200, { ok: true });
     }
     if (p === '/api/events') {
       const seat = url.searchParams.get('seat') || 'spec', r = rooms.get(url.searchParams.get('room'));

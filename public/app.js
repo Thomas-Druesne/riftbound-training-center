@@ -44,7 +44,9 @@ const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLow
 
 /* ================= sound (synthesized, no audio files) ================= */
 const sfx = (() => {
-  let ctx, master, muted = store.get('mute', false), lastHover = 0;
+  let ctx, master, muted = store.get('mute', false), lastHover = 0, k = 1;
+  // volumes (Options): animations (cards, turns, points, clicks) and hover, 0..1
+  const vol = { anim: store.get('volAnim', 1), hover: store.get('volHover', 1) };
   const init = () => {
     if (!ctx) {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -62,7 +64,7 @@ const sfx = (() => {
     const o = ctx.createOscillator(), g = ctx.createGain();
     o.type = type; o.frequency.setValueAtTime(f, t);
     if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    vol *= k; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.05);
   };
   const noise = (t, dur, vol, freq) => {
@@ -70,18 +72,20 @@ const sfx = (() => {
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     const s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
     s.buffer = b; f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = 1.2;
-    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    g.gain.setValueAtTime(vol * k, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     s.connect(f); f.connect(g); g.connect(master); s.start(t);
   };
-  const play = fn => { if (muted) return; try { init(); fn(ctx.currentTime); } catch {} };
+  const play = (fn, kind = 'anim') => { if (muted || !(vol[kind] > 0.001)) return; try { init(); k = vol[kind]; fn(ctx.currentTime); } catch {} };
   return {
-    hover: () => { const n = performance.now(); if (n - lastHover < 60) return; lastHover = n; play(t => tone(2600, t, 0.045, 0.01)); },
+    hover: () => { const n = performance.now(); if (n - lastHover < 60) return; lastHover = n; play(t => tone(2600, t, 0.045, 0.01), 'hover'); },
     click: () => play(t => { tone(1318.5, t, 0.25, 0.04); tone(1975.5, t + 0.035, 0.32, 0.022); noise(t, 0.04, 0.015, 3500); }),
     card: () => play(t => { noise(t, 0.11, 0.03, 850); tone(190, t, 0.12, 0.035, 'sine', 95); }),
     turn: () => play(t => [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => tone(f, t + i * 0.07, 0.8, 0.026, 'triangle'))),
     score: () => play(t => [783.99, 1046.5, 1318.5].forEach((f, i) => tone(f, t + i * 0.08, 0.5, 0.035))),
     start: () => play(t => { tone(196, t, 1.4, 0.045, 'triangle', 392); tone(293.7, t + 0.06, 1.4, 0.03, 'sine', 587.3); noise(t, 0.7, 0.015, 1400); }),
     toggle() { muted = !muted; store.set('mute', muted); return muted; },
+    setVol(kind, v) { vol[kind] = v; store.set(kind === 'hover' ? 'volHover' : 'volAnim', v); },
+    vol,
     get muted() { return muted; },
   };
 })();
@@ -97,6 +101,26 @@ const muteBtn = () => {
   return b;
 };
 document.body.append(Object.assign(muteBtn(), { className: 'mute fixed' }));
+/* ================= options: language, sound volumes ================= */
+const GEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></svg>';
+const optionsBtn = () => { const b = h('button', { class: 'mute opt', title: T('Options'), onclick: openOptions }); b.innerHTML = GEAR; return b; };
+function openOptions() {
+  const slider = (label, help, kind) => {
+    const out = h('b', {}, Math.round(sfx.vol[kind] * 100) + ' %');
+    const r = h('input', { type: 'range', min: 0, max: 100, value: Math.round(sfx.vol[kind] * 100), oninput: e => { sfx.setVol(kind, e.target.value / 100); out.textContent = e.target.value + ' %'; },
+      onchange: () => (kind === 'hover' ? sfx.hover() : sfx.click()) });
+    return h('div', { class: 'opt-row' }, h('div', {}, h('span', {}, T(label)), h('small', {}, T(help))), r, out);
+  };
+  const langBtn = (code, label) => h('button', { class: 'btn' + (LANG === code ? ' gold' : ''), onclick: () => { if (LANG === code) return; store.set('lang', code); location.reload(); } }, label);
+  openModal(h('div', { class: 'box options' },
+    h('h3', {}, T('Options')),
+    h('div', { class: 'opt-row' }, h('div', {}, h('span', {}, T('Langue')), h('small', {}, T('La page se recharge pour changer de langue.'))), h('div', { class: 'opt-lang' }, langBtn('fr', 'Français'), langBtn('en', 'English'))),
+    slider('Volume des animations', 'Sons des cartes, des tours, des points et des clics.', 'anim'),
+    slider('Volume du survol', 'Petit son au passage de la souris sur les boutons.', 'hover'),
+    h('label', { class: 'opt-mute' }, h('input', { type: 'checkbox', checked: sfx.muted, onchange: () => { const m = sfx.toggle(); $$('.mute:not(.opt)').forEach(x => (x.innerHTML = SPEAKER(m))); } }), T('Couper tous les sons')),
+    h('div', { class: 'row' }, h('button', { class: 'btn gold', onclick: closeModal }, T('Fermer')))));
+}
+document.body.append(Object.assign(optionsBtn(), { className: 'mute opt fixed' }));
 
 /* ================= hover zoom: a big readable copy next to any face-up card ================= */
 const zoomEl = h('div', { class: 'zoom' });
@@ -462,12 +486,79 @@ function onState(v) {
   if (v.phase === 'playing' && S.me && !!(v.auto || {})[S.me] !== wantAuto && S.autoSync !== S.room + wantAuto) {
     S.autoSync = S.room + wantAuto; send({ type: 'setAuto', on: wantAuto });
   }
-  if (!prev || prev.phase !== 'playing') {
+  // next game of the match: same room, fresh board
+  const newGame = prev && prev.match && v.match && prev.match.game !== v.match.game;
+  if (newGame) { for (const el of els.values()) el.remove(); els.clear(); S.diceSeen = null; S.endFor = null; S.siding = false; closeModal(); }
+  if (!prev || prev.phase !== 'playing' || newGame) {
     if (S.seat === 'solo') S.me = v.first;
     S.lastActive = null; S.lastScores = {}; S.autoSwap = null; skeletonKey = '';
     if (S.screen !== 'decks') show('game');
   }
-  if (S.screen === 'game') renderGame();
+  if (S.screen === 'game') { renderGame(); renderEnd(v); }
+}
+
+/* ================= end of game: result, match score (BO3), sideboarding ================= */
+const matchNeed = m => Math.ceil(m.bo / 2);
+function renderEnd(v) {
+  if (!v.winner) { if (S.endFor) { S.endFor = null; closeModal(); } return; }
+  const m = v.match || { bo: 1, wins: {}, ready: {} }, op = other(S.me);
+  const key = [S.room, m.game, v.winner, m.wins[S.me], m.wins[op], !!(m.ready || {})[S.me]].join('|');
+  if (S.endFor === key || S.siding || S.endHidden === key) return;
+  S.endFor = key;
+  const won = v.winner === S.me, over = m.wins[S.me] >= matchNeed(m) || m.wins[op] >= matchNeed(m), waiting = !!(m.ready || {})[S.me];
+  const next = body => api('/api/room/next', { body: { room: S.room, seat: S.seat, ...body } }).catch(e => toast(e.message));
+  const again = m.bo > 1 && !over;
+  openModal(h('div', { class: 'box endbox ' + (won ? 'win' : 'lose') },
+    h('div', { class: 'end-kicker' }, m.bo > 1 ? `${T('Match')} BO${m.bo} · ${T('Partie')} ${m.game}` : T('Fin de la partie')),
+    h('h2', {}, won ? T('Victoire !') : T('Défaite')),
+    h('p', {}, `${pname(v.winner)} ${T('atteint')} ${v.players[v.winner].score} ${T('points')}.`),
+    m.bo > 1 ? h('div', { class: 'end-score' }, h('span', {}, T('Vous')), h('b', {}, `${m.wins[S.me]} – ${m.wins[op]}`), h('span', {}, pname(op))) : null,
+    m.bo > 1 && over ? h('p', { class: 'end-match' }, m.wins[S.me] > m.wins[op] ? T('Vous remportez le match !') : T('Vous perdez le match.')) : null,
+    waiting ? h('p', { class: 'end-wait' }, T('En attente de l’adversaire…')) : null,
+    h('div', { class: 'row end-actions' },
+      h('button', { class: 'btn', onclick: () => { S.endHidden = key; closeModal(); } }, T('Voir le plateau')),
+      h('button', { class: 'btn danger', onclick: () => { closeModal(); send({ type: 'quit' }); } }, T('Menu principal')),
+      h('button', { class: 'btn', disabled: waiting, onclick: () => next({}) }, again ? T('Partie suivante') : T('Rejouer')),
+      h('button', { class: 'btn gold', disabled: waiting || !v.myDeck, onclick: () => openSideboard(v) }, again ? T('Sideboard et partie suivante') : T('Sideboard et rejouer')))));
+}
+// swap cards one for one between the main deck and the sideboard, then start the next game
+function openSideboard(v) {
+  const d = v.myDeck; if (!d) return;
+  S.siding = true;
+  const copy = l => (l || []).map(x => ({ id: x.id, n: x.n }));
+  let main = copy(d.cards.main), side = copy(d.cards.side);
+  const size = d.base.main.reduce((t, x) => t + x.n, 0), total = l => l.reduce((t, x) => t + x.n, 0);
+  const box = h('div', { class: 'box sideboard' });
+  const move = (from, to, id) => {
+    const a = from.find(x => x.id === id); if (!a) return;
+    if (!--a.n) from.splice(from.indexOf(a), 1);
+    const b = to.find(x => x.id === id); if (b) b.n++; else to.push({ id, n: 1 });
+    draw();
+  };
+  const byCost = (a, b) => ((S.byId[a.id] || {}).energy || 0) - ((S.byId[b.id] || {}).energy || 0) || ((S.byId[a.id] || {}).name || '').localeCompare((S.byId[b.id] || {}).name || '');
+  const col = (title, list, to, bad) => h('div', { class: 'sb-col' + (bad ? ' bad' : '') },
+    h('h4', {}, title, h('span', {}, String(total(list)))),
+    h('div', { class: 'sb-grid' }, list.slice().sort(byCost).map(x => {
+      const el = cardView(S.byId[x.id]);
+      el.append(h('span', { class: 'sb-n' }, '×' + x.n));
+      el.onclick = () => { hideZoom(); move(list, to, x.id); };
+      return el;
+    })));
+  function draw() {
+    const ok = total(main) === size;
+    box.innerHTML = '';
+    box.append(h('h3', {}, T('Sideboard')),
+      h('p', { class: 'sb-help' }, `${T('Cliquez sur une carte pour la passer de l’autre côté. Le deck doit garder')} ${size} ${T('cartes')}.`),
+      h('div', { class: 'sb-cols' }, col(T('Deck principal'), main, side, !ok), col(T('Sideboard'), side, main)),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn', onclick: () => { main = copy(d.base.main); side = copy(d.base.side); draw(); } }, T('Deck d’origine')),
+        h('button', { class: 'btn', onclick: () => { S.siding = false; S.endFor = null; renderEnd(S.v); } }, T('Retour')),
+        h('button', { class: 'btn gold', disabled: !ok, onclick: async () => {
+          try { await api('/api/room/next', { body: { room: S.room, seat: S.seat, main, side } }); S.siding = false; S.endFor = null; if (S.v && S.v.winner) renderEnd(S.v); }
+          catch (e) { toast(e.message); }
+        } }, T('Lancer la partie'))));
+  }
+  draw(); openModal(box);
 }
 
 /* ================= play screen (mode choice) ================= */
@@ -484,9 +575,9 @@ const ICONS = {
     <path d="M40 6h-6L14 26l6 6 20-20Z" fill="currentColor" fill-opacity=".15"/><path d="M20 32l4 4M14 26l-4-4M17 35l-7 7M13 31l-7 7"/></svg>`,
 };
 const LEVELS = [
-  ['easy', 'Adversaire débutant', 'Joue au hasard, gaspille ses runes, attaque sans réfléchir.'],
-  ['normal', 'Adversaire confirmé', 'Lance ses sorts au bon moment, contre et réagit en combat, prend les champs de bataille.'],
-  ['hard', 'Pro Player', 'Calcule toutes les attaques possibles et la riposte adverse, optimise chaque rune.'],
+  ['easy', 'Adversaire débutant', 'Joue simplement : prend les champs de bataille, lance quelques sorts, fait des erreurs.'],
+  ['normal', 'Adversaire confirmé', 'Joue bien : sorts au bon moment, contres, réactions en combat, retrait ciblé.'],
+  ['hard', 'Pro Player', 'Impitoyable : calcule chaque attaque et la riposte, ne gaspille rien, punit chaque erreur.'],
 ];
 S.mode = store.get('mode', 'ai'); S.level = store.get('level', 'normal');
 async function renderLobby() {
@@ -512,6 +603,8 @@ async function renderLobby() {
   const myDeck = h('select', {}, deckOpts(store.get('deck', ''), h('option', { value: '' }, '— Votre deck —')));
   const nameIn = h('input', { placeholder: 'Votre nom', value: S.name, oninput: e => { S.name = e.target.value; store.set('name', S.name); } });
   myDeck.onchange = () => store.set('deck', myDeck.value);
+  // BO1 / BO3 (best of three: sideboarding between games)
+  const boSel = h('select', { onchange: e => store.set('bo', +e.target.value) }, [1, 3].map(n => h('option', { value: n, selected: store.get('bo', 1) === n }, n === 1 ? T('BO1 (une partie)') : T('BO3 (deux manches gagnantes)'))));
   const tabs = [['ai', 'Contre l’IA', ICONS.ai], ['pvp', 'Contre un joueur', ICONS.pvp]];
   if (!tabs.some(t => t[0] === S.mode)) S.mode = 'ai';
   const create = async (mode, extra = {}) => {
@@ -523,7 +616,7 @@ async function renderLobby() {
       const drawn = [myDeck.value === RANDOM && `vous : ${deckName(mine)}`, extra.drawnAi && `IA : ${deckName(extra.deckId2)}`].filter(Boolean);
       if (drawn.length) toast('🎲 Deck tiré au sort — ' + drawn.join(' · '));
       delete extra.drawnAi;
-      const r = await api('/api/room/create', { body: { mode, name: S.name, deckId: mine, auto: true, ...extra } });
+      const r = await api('/api/room/create', { body: { mode, name: S.name, deckId: mine, auto: true, bo: +boSel.value, ...extra } });
       connect(r.tag, r.seat); S.me = r.seat;
       if (mode === 'pvp') setTimeout(renderLobby, 150);
     } catch (e) { toast(e.message); }
@@ -534,13 +627,13 @@ async function renderLobby() {
     aiDeck.onchange = () => store.set('aiDeck', aiDeck.value);
     panel = h('div', { class: 'mode-panel' },
       h('div', { class: 'levels' }, LEVELS.map(([k, t, d]) => h('button', { class: 'lvl ' + k + (S.level === k ? ' on' : ''), onclick: e => { S.level = k; store.set('level', k); $$('.lvl').forEach(b => b.classList.toggle('on', b === e.currentTarget)); } },
-        h('b', {}, t), h('span', {}, d)))),
-      h('div', { class: 'form' }, h('label', {}, 'Votre deck', myDeck), h('label', {}, 'Deck de l’IA', aiDeck)),
+        h('b', {}, T(t)), h('span', {}, T(d))))),
+      h('div', { class: 'form' }, h('label', {}, 'Votre deck', myDeck), h('label', {}, 'Deck de l’IA', aiDeck), h('label', {}, T('Format'), boSel)),
       h('button', { class: 'btn gold big', onclick: () => create('ai', { level: S.level, deckId2: aiDeck.value, drawnAi: aiDeck.value === RANDOM }) }, 'Lancer la partie'));
   } else if (S.mode === 'pvp') {
     const tagIn = h('input', { placeholder: 'TAG', class: 'tag-in', maxlength: 10 });
     panel = h('div', { class: 'mode-panel' },
-      h('div', { class: 'form' }, h('label', {}, 'Votre nom', nameIn), h('label', {}, 'Votre deck', myDeck)),
+      h('div', { class: 'form' }, h('label', {}, 'Votre nom', nameIn), h('label', {}, 'Votre deck', myDeck), h('label', {}, T('Format'), boSel)),
       h('div', { class: 'pvp' },
         h('div', { class: 'pvp-col' }, h('h4', {}, 'Créer une partie'), h('p', {}, 'Un tag est généré : donnez-le à votre adversaire.'), h('button', { class: 'btn gold big', onclick: () => create('pvp') }, 'Créer')),
         h('div', { class: 'pvp-or' }, 'ou'),
@@ -672,18 +765,20 @@ function syncCard(c, faceDown, extraCls, zone) {
   el.className = `card ${back ? 'back ' + backKind(data, zone) : ''} ${data && data.landscape ? 'landscape' : ''} ${c.ex ? 'ex' : ''} ${S.sel === c.iid ? 'sel' : ''} ${extraCls || ''}`;
   // badges
   const bd = el.querySelector('.badges'); bd.innerHTML = '';
+  // a face-down card shows nothing about itself (not even to its owner: the opponent may be looking at the screen)
+  if (back || c.fd) { if (/hiddencard/.test(extraCls || '')) bd.append(h('span', { class: 'badge hid' }, T('CACHÉE'))); return el; }
   if (c.dmg) bd.append(h('span', { class: 'badge dmg' }, c.dmg));
   if (c.buff) bd.append(h('span', { class: 'badge buff' + (c.buff < 0 ? ' neg' : '') }, (c.buff > 0 ? '+' : '') + c.buff));
   const eq = eqOn(c);
   if ((c.buff || c.tb || eq.length) && data && data.might != null) bd.append(h('span', { class: 'badge might' }, '⚔' + (data.might + (c.buff || 0) + (c.tb || 0) + eq.reduce((t, g) => t + ((cardOf(g) || {}).might || 0), 0))));
   if (eq.length) bd.append(h('span', { class: 'badge equip', title: eq.map(g => (cardOf(g) || {}).name).join(', ') }, '⚙ ' + eq.length));
   if (c.att) { const u = locate(c.att); bd.append(h('span', { class: 'badge equip' }, '⚙ ' + (u && cardOf(u.c) ? cardOf(u.c).name.split(',')[0] : 'attaché'))); }
-  if (c.emp) bd.append(h('span', { class: 'badge emp' }, 'EMPOWERED'));
+  if (c.emp) bd.append(h('span', { class: 'badge emp' }, T('RENFORCÉE')));
   if (data && data.supertype === 'Token') el.classList.add('token');
-  if (c.rev) bd.append(h('span', { class: 'badge rev' }, 'RÉVÉLÉE'));
+  if (c.rev) bd.append(h('span', { class: 'badge rev' }, T('RÉVÉLÉE')));
   // [Mighty]: a unit with 5+ Might on the board
-  if (data && data.type === 'Unit' && (zone === 'base' || /^p[12]$/.test(zone)) && (data.might || 0) + (c.buff || 0) + (c.tb || 0) >= 5) bd.append(h('span', { class: 'badge mighty' }, 'MIGHTY'));
-  if (c.st) { bd.append(h('span', { class: 'badge stun' }, 'ÉTOURDI')); el.classList.add('stun'); }
+  if (data && data.type === 'Unit' && (zone === 'base' || /^p[12]$/.test(zone)) && (data.might || 0) + (c.buff || 0) + (c.tb || 0) >= 5) bd.append(h('span', { class: 'badge mighty' }, T('PUISSANTE')));
+  if (c.st) { bd.append(h('span', { class: 'badge stun' }, T('ÉTOURDI'))); el.classList.add('stun'); }
   return el;
 }
 
@@ -973,7 +1068,9 @@ function renderHud() {
     pre ? '' : undoBtn(),
     autoBtn(),
     muteBtn(),
+    optionsBtn(),
     v.mode === 'ai' ? '' : h('span', { class: 'roomtag', title: 'Tag de la partie' }, `Tag ${v.room}`),
+    v.winner ? B(T('Résultat'), () => { S.endHidden = null; S.endFor = null; renderEnd(S.v); }, '', 'gold') : '',
     B(v.winner ? 'Quitter' : 'Abandonner', () => { if (v.winner || confirm('Quitter la partie ? Elle se termine pour les deux joueurs.')) send({ type: 'quit' }); }, '', 'danger'));
 }
 
@@ -1232,7 +1329,7 @@ function cardMenu(e, iid) {
     onBoard && mine && d && d.type === 'Gear' && /\[Equip\]/.test(txt) ? (c.att ? ['Détacher l’équipement', () => send({ type: 'unequip', iid })]
       : { sub: `Équiper (${costLabel(txt, 'Equip')})`, items: myUnits.length ? myUnits.map(u => [(cardOf(u) || {}).name || 'unité', () => send({ type: 'equip', iid, unit: u.iid })]) : [['Aucune unité', () => {}]] }) : null,
     ...(onBoard && mine && d && d.ab ? d.ab.map((ab, k) => [`⚡ ${rbText(ab.text)}${ab.e || ab.p || ab.kill || ab.xp ? ` (${[ab.e ? ab.e + ' ⚡' : '', ab.p ? ab.p + ' ◆' : '', ab.xp ? ab.xp + ' XP' : '', ab.kill ? 'détruire cette carte' : ''].filter(Boolean).join(' + ')})` : ''}${c.ex ? ' — épuisé' : ''}`, () => activate(iid, k)]) : []),
-    onBoard && mine && /\[Empower\]/.test(txt) ? [c.emp ? 'Retirer Empowered' : `Empower (${costLabel(txt, 'Empower')})`, () => send({ type: 'empower', iid })] : null,
+    onBoard && mine && /\[Empower\]/.test(txt) ? [c.emp ? 'Retirer le renfort (Empowered)' : `Renforcer (Empower ${costLabel(txt, 'Empower')})`, () => send({ type: 'empower', iid })] : null,
     onBoard && mine && d && d.name === 'Gold' && d.supertype === 'Token' ? ['Utiliser le Gold (+1 puissance au choix)', () => send({ type: 'gold', iid })] : null,
     inHand && mine && d && ['Unit', 'Spell', 'Gear'].includes(d.type) ? [d.type === 'Spell' ? '✦ Lancer (sur la pile)' : '✦ Jouer', () => playCard(iid), 'P'] : null,
     ...(inHand && mine && d && d.type === 'Unit' ? S.v.bfs.map((b, i) => i).filter(i => {
@@ -1277,7 +1374,7 @@ function pileMenu(p, z, e) {
   const mine = p === S.me;
   if (!mine && (z === 'main' || z === 'runeDeck')) return;
   const items = [[z === 'main' || z === 'runeDeck' ? 'Chercher dans le deck' : 'Voir les cartes', () => openViewer(p, z)]];
-  if (mine && z === 'main') items.unshift(['Piocher 1', () => send({ type: 'draw', n: 1, p }), 'D'], ['Piocher 2', () => send({ type: 'draw', n: 2, p })], ['Piocher…', () => { const n = parseInt(prompt('Combien de cartes ?', '1')); if (n > 0) send({ type: 'draw', n, p }); }], ['Mélanger', () => send({ type: 'shuffle', zone: 'main', p })], '-');
+  if (mine && z === 'main') items.unshift(['Piocher 1', () => send({ type: 'draw', n: 1, p }), 'D'], ['Piocher 2', () => send({ type: 'draw', n: 2, p })], ['Piocher…', () => { const n = parseInt(prompt('Combien de cartes ?', '1')); if (n > 0) send({ type: 'draw', n, p }); }], ['Regarder 1', () => send({ type: 'look', n: 1 })], ['Regarder…', () => { const n = parseInt(prompt(T('Combien de cartes regarder ?'), '2')); if (n > 0) send({ type: 'look', n }); }], ['Mélanger', () => send({ type: 'shuffle', zone: 'main', p })], '-');
   if (mine && z === 'runeDeck') items.unshift(['Canaliser 1', () => send({ type: 'channel', n: 1, p }), 'C'], ['Canaliser 2', () => send({ type: 'channel', n: 2, p })], ['Mélanger', () => send({ type: 'shuffle', zone: 'runeDeck', p })], '-');
   menu(e, ZNAME[z] + ' · ' + pname(p), items);
 }
@@ -1380,6 +1477,10 @@ document.addEventListener('pointerup', e => {
   const src = locate(d.iid), data = src && cardOf(src.c);
   if (to.hide != null && src && (src.zone === 'hand' || src.zone === 'champion')) return send({ type: 'hide', iid: d.iid, bf: to.hide }).then(() => { if (els.get(d.iid) && locate(d.iid) && locate(d.iid).zone === src.zone) animateFrom(els.get(d.iid), gr); });
   if (to.hide != null) return animateFrom(d.el, gr);
+  // a [Hidden] card dropped on my side of a battlefield is hidden there (face down), not played: playing it
+  // would trigger "when you play a unit" effects (the menu "Jouer" still plays it face up).
+  if (to.bf != null && to.side === S.me && !e.shiftKey && src && src.zone === 'hand' && data && HIDDEN_RE.test(data.text || '') && !/[Ambush]/i.test(data.text || ''))
+    return send({ type: 'hide', iid: d.iid, bf: to.bf }).then(() => { if (els.get(d.iid) && locate(d.iid) && locate(d.iid).zone === src.zone) animateFrom(els.get(d.iid), gr); });
   const ontoBoard = to.zone === 'base' || to.bf != null;
   if (src && (src.zone === 'hand' || src.zone === 'champion') && ontoBoard && !e.shiftKey && data && data.type === 'Spell') { animateFrom(d.el, gr); return playCard(d.iid); }
   if (src && (src.zone === 'hand' || src.zone === 'champion') && ontoBoard && !e.shiftKey && data && ['Unit', 'Spell', 'Gear'].includes(data.type)) {
