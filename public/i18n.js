@@ -64,6 +64,7 @@ const EN = {
   'Canaliser 1 rune épuisée ?': 'Channel 1 rune exhausted?', 'Détruire une de vos unités ici pour piocher 1 ?': 'Kill one of your units here to draw 1?',
   'conquête': 'conquer', 'tenir': 'hold', 'défense': 'defend', 'combat': 'combat', 'début de tour': 'beginning phase', 'premier tour': 'first turn', 'carte cachée': 'hidden card',
   'Rockfall Path : aucune unité ne peut y être jouée.': 'Rockfall Path: units can’t be played here.',
+  'À vous de répondre': 'Your response', 'Équiper un de vos équipements à cette unité (Weaponmaster) ?': 'Attach one of your Equipment to this unit (Weaponmaster)?',
   'Son': 'Sound', 'Options': 'Options', 'Force adverse ici': 'Enemy Might here', 'Votre force ici': 'Your Might here', 'Buff': 'Buff',
   // stack, prompts
   'champ de bataille': 'battlefield', ' (la vôtre)': ' (yours)', 'Son effet s’applique à la résolution.': 'Its effect applies on resolution.',

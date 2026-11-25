@@ -22,6 +22,7 @@ function kw(text) {
     hunt: n(/\[Hunt(?: (\d+))?\]/),
     deathDraw: n(/\[Deathknell\]\s*\[(?:>|&gt;)\]\s*Draw (\d+)\./),
     backline: /\[Backline\]/.test(t), disarm: n(/\[Disarm(?: (\d+))?\]/), deflect: n(/\[Deflect(?: (\d+))?\]/),
+    weaponmaster: /\[Weaponmaster\]/.test(t),
     hidden: /\[Hidden\]|(^|\n)Hidden \(/.test(t), quickDraw: /^[^.]*\[Quick-Draw\]/.test(t), equip: /\[Equip\]/.test(t),
     // timing permission of the card itself: a leading [Reaction] / [Action] keyword (not an "[Action][>]" ability)
     reaction: timing(t, 'Reaction'), action: timing(t, 'Action'),
@@ -129,7 +130,8 @@ const CARD_FX = {
 };
 Object.assign(CARD_FX, {
   'Solari Chief': [T('stunOrKill', { side: 'enemy' })],
-  'Elnuk Herd': [T('might', { n: 3, side: 'friendly', notSelf: true })],
+  'Elnuk Herd': [T('might', { n: 3, side: 'friendly', notSelf: true }), { who: 'self', kind: 'recycleSelf', ifHidden: true }],
+  'Blitzcrank, Impassive': [T('moveTo', { side: 'enemy', to: 'here', opt: true, notHere: true })],
   'Walking Roost': [{ kind: 'token', who: 'opp', name: 'Bird', n: 1 }],
   'Chakram Dancer': [{ kind: 'allKw', kw: 'shield', n: 1, here: true, notSelf: true }],
   'Iridescent Avian': [], // its ability is in the table of abilities below
@@ -230,7 +232,11 @@ const TRIGGER = {
   hold: /When I hold,\s*/i, move: /When I move(?: to a battlefield)?,\s*/i,
   playSpell: /When you play a spell,\s*/i, playUnit: /When you play a unit,\s*/i, allyDies: /When (?:another|a) friendly unit dies,\s*/i, deathknell: /\[Deathknell\]\s*(?:—|\[(?:>|&gt;)\])?\s*/i,
 };
+const TRIG_FX = {
+  'Irresistible Faefolk': { move: [T('moveTo', { side: 'enemy', to: 'here', opt: true, notHere: true })] },
+};
 function triggerFx(card, ev) {
+  const hand = TRIG_FX[card.name]; if (hand) return (hand[ev] || []).map(e => ({ ...e }));
   const t = (card.text || '').replace(/\([^)]*\)/g, ''), m = TRIGGER[ev] && TRIGGER[ev].exec(t);
   if (!m) return [];
   const rest = t.slice(m.index + m[0].length).split(/(?<=[.!])\s+/);

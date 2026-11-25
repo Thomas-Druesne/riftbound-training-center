@@ -4,6 +4,7 @@
 // sharper tricks and counters). Menu levels map onto them: easy -> normal, normal -> hard, hard -> pro (PROFILE).
 const PROFILE = { easy: 'normal', normal: 'hard', hard: 'pro' };
 const hardish = l => l === 'hard' || l === 'pro';
+const noUnitsHere = (s, i) => s.bfs[i] && s.bfs[i].card && G.cd(s, s.bfs[i].card).name === 'Rockfall Path'; // "Units can't be played here"
 // the turn plan chosen by the pro's look-ahead (see planTurn): flags read by phaseMain / phaseAttack
 let PLAN = {};
 let SIM = 0; // > 0 while the pro simulates (no look-ahead inside a look-ahead)
@@ -418,8 +419,8 @@ const afford = (s, me, list) => { // can this sequence of cards be paid from run
 function phaseMain(s, me, level) {
   const z = s.players[me].zones, op = other(me);
   const cands = [], FREE = { e: 0, p: [] };
-  const hiddenMine = s.bfs.flatMap((b, i) => (b.hidden || []).filter(c => c.owner === me && s.turn > (c.hidT || 0)).map(c => ({ c, i })));
-  const hidFree = s.bfs.map((b, i) => i).filter(i => s.bfs[i].ctrl === me && !(s.bfs[i].hidden || []).length);
+  const hiddenMine = s.bfs.flatMap((b, i) => (b.hidden || []).filter(c => c.owner === me && s.turn > (c.hidT || 0) && !(noUnitsHere(s, i) && G.cd(s, c).type === 'Unit')).map(c => ({ c, i })));
+  const hidFree = s.bfs.map((b, i) => i).filter(i => s.bfs[i].ctrl === me && !(s.bfs[i].hidden || []).length && !noUnitsHere(s, i));
   for (const c of [...z.hand, ...z.champion, ...hiddenMine.map(x => x.c)]) {
     const d = G.cd(s, c), fromHid = hiddenMine.some(x => x.c === c);
     if (!['Unit', 'Gear', 'Spell'].includes(d.type)) continue;
@@ -480,7 +481,7 @@ function phaseMain(s, me, level) {
     const m = model(s, me);
     let best = null;
     s.bfs.forEach((b, i) => {
-      if (!b.units[op].length || b.units[me].length) return;
+      if (!b.units[op].length || b.units[me].length || noUnitsHere(s, i)) return;
       const t = clone(m); t.bfs[i].u[me].push(unitOf(s, x.c, me));
       const v = fightValue(t, i, me, me);
       if (v > 2 && (!best || v > best.v)) best = { v, i };
@@ -620,7 +621,7 @@ function combatTrick(s, me, level, reactionOnly) {
   for (const { c, d, hidBf } of quickCards(s, me, reactionOnly)) {
     if (d.type === 'Unit') { // Ambush (where I already have units) or a hidden unit at this battlefield: reinforce
       const kd = R.kw(d.text);
-      if (hidBf != null ? hidBf !== i : !kd.ambush || !(s.bfs[i].units[me].length || (kd.toEnemyBf && s.bfs[i].units[op].length))) continue;
+      if (hidBf != null ? hidBf !== i || noUnitsHere(s, i) : !kd.ambush || noUnitsHere(s, i) || !(s.bfs[i].units[me].length || (kd.toEnemyBf && s.bfs[i].units[op].length))) continue;
       const t = clone(m); t.bfs[i].u[me].push(unitOf(s, c, me));
       opts.push({ v: fightValue(t, i, sd.att, me), act: hidBf != null ? { type: 'play', iid: c.iid } : { type: 'play', iid: c.iid, to: { bf: i } } });
       continue;
@@ -745,6 +746,7 @@ const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i 
 function guess(s, me) {
   const { history, log, ...rest } = s, c = structuredClone(rest), op = other(me);
   c.history = []; c.log = [];
+  c.auto = { p1: true, p2: true }; // a human in manual mode would stall the simulated game (no payment, no ready)
   const zo = c.players[op].zones, all = shuffle([...zo.hand.filter(x => !x.rev), ...zo.main]), k = zo.hand.filter(x => !x.rev).length;
   zo.hand = [...zo.hand.filter(x => x.rev), ...all.slice(0, k)]; zo.main = all.slice(k);
   shuffle(c.players[me].zones.main);
@@ -760,12 +762,16 @@ function evalState(s, me) {
 }
 // play my turn with a plan, the opponent's turn, then my next turn (both sides 'hard'), and score the result
 // the best few attacks, each played out on guessed copies of the game
+const BUDGET = 1200; // ms of look-ahead per decision at most
 function proAttack(s, me, m) {
+  const key = me + '|' + s.turn + '|' + s.rev;
+  if (proAttack.key === key) return proAttack.moves;
   const cands = searchAttack(m, me, 4);
   if (cands.length < 2) return cands[0] ? cands[0].moves : [];
-  const guesses = Array.from({ length: 5 }, () => guess(s, me));
+  const guesses = Array.from({ length: 5 }, () => guess(s, me)), t0 = Date.now();
   let best = null;
   for (const cand of cands) {
+    if (best && Date.now() - t0 > BUDGET) break;
     let v = 0;
     for (const g0 of guesses) {
       const c = structuredClone(g0);
@@ -775,6 +781,7 @@ function proAttack(s, me, m) {
     v /= guesses.length;
     if (!best || v > best.v + 0.01) best = { v, moves: cand.moves };
   }
+  proAttack.key = key; proAttack.moves = best.moves;
   return best.moves;
 }
 function rollout(c, me, mem, plan) {
@@ -795,9 +802,10 @@ function rolloutRun(c, me, mem, plan) {
 function planTurn(s, me, mem) {
   const key = me + '|' + s.turn + '|' + s.rev; // the server looks once before acting: same position, same plan
   if (planTurn.key === key) { mem.plan = planTurn.plan; mem.planTurn = s.turn; return; }
-  const guesses = Array.from({ length: 6 }, () => guess(s, me));
+  const guesses = Array.from({ length: 6 }, () => guess(s, me)), t0 = Date.now();
   let best = null;
   for (const plan of VARIANTS) {
+    if (best && Date.now() - t0 > BUDGET) break;
     const v = guesses.reduce((a, c) => a + rollout(structuredClone(c), me, mem, plan), 0) / guesses.length;
     if (!best || v > best.v + 0.01) best = { v, plan };
   }

@@ -36,9 +36,18 @@ function mk(s, cid, owner) { return { iid: 'c' + ++s.iid, cid, owner, ex: false,
 const cd = (s, c) => (s.cd && s.cd[c.cid]) || {};
 // effective might of a unit; role 'a' attacker (Assault), 'd' defender (Shield)
 // equipment attached to a unit (gear stays listed in its controller's base, with att = unit iid)
-const gearOn = (s, c) => SEATS.flatMap(p => s.players[p].zones.base.filter(g => g.att === c.iid));
+const gearOn = (s, c) => SEATS.flatMap(p => s.players[p].zones.base.filter(g => g.att === c.iid && cd(s, g).type === 'Gear'));
+function kwOf(s, c) {
+  const k = { ...R.kw(cd(s, c).text) };
+  for (const g of gearOn(s, c)) {
+    const x = R.kw(cd(s, g).text);
+    for (const n of ['assault', 'shield', 'hunt', 'deflect', 'disarm']) k[n] += x[n];
+    for (const n of ['tank', 'ganking', 'backline']) k[n] = k[n] || x[n];
+  }
+  return k;
+}
 function hp(s, c, role) {
-  const d = cd(s, c), k = R.kw(d.text);
+  const d = cd(s, c), k = kwOf(s, c);
   const eq = gearOn(s, c).reduce((t, g) => t + (cd(s, g).might || 0), 0);
   return Math.max(0, (d.might || 0) + eq + (c.buff || 0) + (c.tb || 0) + auraBonus(s, c, d) + (role === 'a' ? k.assault + (c.ta || 0) : role === 'd' ? k.shield + (c.ts || 0) : 0));
 }
@@ -61,7 +70,7 @@ function auraBonus(s, c, d) {
   if (b) for (const a of R.auras(cd(s, b))) if (a.who === 'any' && (!a.champion || d.supertype === 'Champion')) n += a.n;
   if (b) {
     const bn = cd(s, b).name, sd = s.showdown;
-    if (bn === 'Kinkou Temple' && (R.kw(d.text).tank || c.tt)) n += 1;
+    if (bn === 'Kinkou Temple' && (kwOf(s, c).tank || c.tt)) n += 1;
     if (bn === 'Brush' && (d.tags || []).some(t => ['Bird', 'Cat', 'Dog', 'Poro', 'Ivern'].includes(t))) n += 1;
     if (bn === 'Forbidding Waste' && sd && sd.bf === f.bf && sd.att !== f.p && s.bfs[f.bf].units[f.p].length === 1) n -= 2;
   }
@@ -141,11 +150,13 @@ function mayCond(s, p, e) {
     case 'mightyHere': return here.some(c => hp(s, c) >= 5);
     case 'buffed': return unitsOf(s, p).some(c => c.buff > 0);
     case 'unitsHere': return here.length > 0;
+    case 'hasGear': return s.players[p].zones.base.some(g => cd(s, g).type === 'Gear' && /\[Equip\]/.test(cd(s, g).text || ''));
     default: return true;
   }
 }
 const EV = { attack: 'attaque', defend: 'défend', conquer: 'conquête', hold: 'tient', move: 'déplacement', deathknell: 'à sa mort (Deathknell)', playSpell: 'sort joué', playUnit: 'unité jouée', allyDies: 'unité alliée détruite' };
 function trigger(s, c, ev, p, bf) {
+  if (cd(s, c).type === 'Unit') for (const g of gearOn(s, c)) trigger(s, g, ev, p, bf); // gear only: no loop
   const d = cd(s, c), fx = R.triggerFx(d, ev);
   if (!fx.length) return;
   log(s, `↳ ${d.name} (${EV[ev] || ev}) : capacité déclenchée.`);
@@ -172,7 +183,7 @@ function makeTokens(s, p, e, bf, why) {
 function buff(s, c) { if (!(c.buff > 0)) c.buff = (c.buff || 0) + 1; log(s, `${name(s, c)} reçoit un buff (+1 force).`); }
 // [Hunt N]: gain N XP when the unit conquers or holds
 function huntXp(s, b, p, why) {
-  const xp = s.bfs[b].units[p].reduce((t, c) => t + R.kw(cd(s, c).text).hunt, 0);
+  const xp = s.bfs[b].units[p].reduce((t, c) => t + kwOf(s, c).hunt, 0);
   if (xp) { s.players[p].xp = (s.players[p].xp || 0) + xp; log(s, `${seatName(s, p)} gagne ${xp} XP (Hunt, ${why}).`); }
 }
 // unit arrives at a battlefield: empty of enemies -> conquer, otherwise a showdown is pending
@@ -226,6 +237,7 @@ function resolveTop(s) {
   if ((cb.targets || []).length) (s.fxDeclared || (s.fxDeclared = {}))[c.iid] = true;
   s.fxQueue = [...fx.map(e => ({ ...e, by: p, card: d.name, src: c.iid, preBf: cb.bf })), ...(s.fxQueue || [])];
   runFx(s);
+  if (s.chain.length) s.chain[s.chain.length - 1].cb.seen = false;
   // stack empty during a showdown: Focus goes to the other player (rule 346)
   if (!s.chain.length && s.showdown) { s.showdown.focus = other(s.showdown.last || p); s.showdown.passes = 0; }
   return null;
@@ -325,6 +337,22 @@ function runFxLoop(s) {
       s.pending = { kind: 'confirm', to, n: 0, by: e.by, card: e.card, text: e.text, fx: e, ai: e.ai !== false };
       log(s, `${T} choisit d’utiliser ou non ${e.card}.`);
     }
+    else if (e.kind === 'recycleSelf') {
+      if (e.ifHidden && !e.fromHidden) continue;
+      const f = e.src && find(s, e.src); if (!f || f.isBf) continue;
+      f.arr.splice(f.i, 1); detach(s, f.c); Object.assign(f.c, { ex: false, dmg: 0, buff: 0, tb: 0, st: false, emp: false, fd: false });
+      s.players[f.c.owner].zones.main.push(f.c); log(s, `${name(s, f.c)} est recyclé sous le deck de son propriétaire (${e.card}).`); syncCtrl(s);
+    }
+    else if (e.kind === 'equipBest') { // [Weaponmaster]: attach one of my Equipment to this unit, its Equip cost minus one power
+      const u = e.src && find(s, e.src); if (!u) continue;
+      const gear = s.players[to].zones.base.filter(g => cd(s, g).type === 'Gear' && /\[Equip\]/.test(cd(s, g).text || '') && g.att !== u.c.iid)
+        .sort((a, b) => (!!a.att - !!b.att) || (cd(s, b).might || 0) - (cd(s, a).might || 0));
+      for (const g of gear) {
+        const cost = R.kwCost(cd(s, g).text, 'Equip') || { e: 0, p: [] }, less = { e: cost.e, p: cost.p.slice(1) };
+        if (auto(s, to) && !pay(s, to, less)) continue;
+        g.att = u.c.iid; log(s, `${name(s, g)} est attaché à ${name(s, u.c)} (${e.card}, Weaponmaster).`); break;
+      }
+    }
     else if (e.kind === 'recycleRune') {
       const z = s.players[to].zones; if (!z.runes.length) continue;
       const [r] = z.runes.splice(Math.max(0, z.runes.findIndex(x => x.ex)), 1); r.ex = false; z.runeDeck.push(r);
@@ -400,6 +428,7 @@ function candidates(s, p, e) {
     if (ctrl !== p && /can't be chosen by enemy spells and abilities/i.test(d.text || '')) return;
     if (e.notSelf && c.iid === e.src) return;
     if (e.self && c.iid !== e.src) return;
+    if (e.notHere && where === 'bf' && bf === e.bfAt) return;
     if (e.tag && !(d.tags || []).includes(e.tag)) return;
     if (e.where === 'bf' && where !== 'bf') return;
     if (e.where === 'base' && where !== 'base') return;
@@ -417,12 +446,12 @@ function candidates(s, p, e) {
 // [Deflect N]: an opponent choosing this permanent must pay N extra Power (any domain)
 function deflectBlocked(s, p, iid) {
   const f = find(s, iid);
-  const n = f && f.p !== p ? R.kw(cd(s, f.c).text).deflect : 0;
+  const n = f && f.p !== p ? kwOf(s, f.c).deflect : 0;
   return n ? !R.planCost(runesOf(s, p), s.players[p].pool, { e: 0, p: Array(n).fill(null) }) : false;
 }
 function payDeflect(s, p, iid) {
   const f = find(s, iid);
-  const n = f && f.p !== p ? R.kw(cd(s, f.c).text).deflect : 0;
+  const n = f && f.p !== p ? kwOf(s, f.c).deflect : 0;
   if (n && pay(s, p, { e: 0, p: Array(n).fill(null) })) log(s, `${seatName(s, p)} paie ${n} puissance (Deflect de ${name(s, f.c)}).`);
 }
 const locOf = (s, iid) => { const f = find(s, iid); return f ? (f.zone === 'bf' ? 'bf' + f.bf : f.zone === 'base' ? 'base:' + f.p : null) : null; };
@@ -456,7 +485,8 @@ function applyTarget(s, e, iid, p) {
   }
   else if (e.op === 'deck') { f.arr.splice(f.i, 1); detach(s, c); Object.assign(c, { ex: false, dmg: 0, buff: 0, tb: 0, st: false, emp: false }); if (!isToken(s, c)) s.players[c.owner].zones.main.push(c); log(s, `${N} est placé sous le deck de son propriétaire${src}.`); syncCtrl(s); return; }
   else if (e.op === 'blink' || e.op === 'moveTo') {
-    const loc = e.to === 'base' ? 'base' : e.to === 'same' ? (f.zone === 'bf' ? f.bf : 'base') : e.preBf != null && s.bfs[e.preBf] ? e.preBf : s.bfs.length === 1 ? 0 : null;
+    if (e.to === 'here' && (e.bfAt == null || !s.bfs[e.bfAt])) return;
+    const loc = e.to === 'here' ? e.bfAt : e.to === 'base' ? 'base' : e.to === 'same' ? (f.zone === 'bf' ? f.bf : 'base') : e.preBf != null && s.bfs[e.preBf] ? e.preBf : s.bfs.length === 1 ? 0 : null;
     if (loc != null) { placeUnit(s, c.iid, loc, e); return; }
     s.pending = { kind: 'bf', to: p, n: 1, by: e.by, card: e.card, fx: { ...e, unit: c.iid }, opts: s.bfs.map((b, i) => i) };
     log(s, `${seatName(s, p)} choisit le champ de bataille de ${N} (${e.card}).`);
@@ -879,7 +909,7 @@ function act(s, a, who) {
         const why = f.p !== who ? 'ce n’est pas votre unité'
           : s.active !== who ? 'les déplacements se font pendant votre tour'
           : c.ex ? `${name(s, c)} est épuisé (un déplacement épuise l’unité, il faut qu’elle soit redressée)`
-          : f.zone === 'bf' && toZone === 'bf' && !R.kw(cd(s, c).text).ganking && bfName(s, a.to.bf) !== 'Baron Pit' && bfName(s, f.bf) !== 'Windswept Hillock' ? `${name(s, c)} ne peut pas aller d’un champ de bataille à un autre sans [Ganking]`
+          : f.zone === 'bf' && toZone === 'bf' && !kwOf(s, c).ganking && bfName(s, a.to.bf) !== 'Baron Pit' && bfName(s, f.bf) !== 'Windswept Hillock' ? `${name(s, c)} ne peut pas aller d’un champ de bataille à un autre sans [Ganking]`
           : f.zone === 'bf' && toZone === 'base' && bfName(s, f.bf) === "Vilemaw's Lair" ? 'Vilemaw’s Lair : les unités ne peuvent pas en revenir à la base'
           : null;
         const sd = s.showdown;
@@ -929,7 +959,7 @@ function act(s, a, who) {
       // During a showdown only Action / Reaction cards; on a pending stack only Reactions.
       let toBf = a.to && a.to.bf != null ? a.to.bf : fromHidden ? f.bf : null;
       const quick = k.reaction || fromHidden || (k.ambush && toBf != null && d.type === 'Unit');
-      if (who !== s.active && !(quick || k.action))
+      if (who !== s.active && !(quick || (k.action && s.showdown)))
         return `Ce n’est pas votre tour : seules les cartes [Reaction] ou [Action] se jouent pendant le tour adverse.`;
       if (s.chain && s.chain.length && !quick) return 'Une carte est sur la pile : seules les cartes [Reaction] peuvent y répondre.';
       if (s.showdown && !(quick || k.action)) return 'Affrontement en cours : seules les cartes [Action] ou [Reaction] se jouent.';
@@ -992,10 +1022,11 @@ function act(s, a, who) {
       // what the opponent must decide or reveal (discard, kill one of their units, reveal their hand)
       const bfAt = toBf != null && d.type === 'Unit' ? toBf : null;
       let fx = R.playFx(d, { legion, xp: pl.xp || 0 });
+      if (d.type === 'Unit' && R.kw(d.text).weaponmaster) fx = [...fx, { who: 'self', kind: 'may', text: 'Équiper un de vos équipements à cette unité (Weaponmaster) ?', cond: 'hasGear', fx: [{ who: 'self', kind: 'equipBest' }] }];
       if (k.quickDraw && d.type === 'Gear') fx = [{ kind: 'target', op: 'attach', side: 'friendly', where: 'any', who: 'self' }, ...fx];
       (s.fxPre || (s.fxPre = {}))[c.iid] = (a.targets || []).slice();
       if ((a.targets || []).length) (s.fxDeclared || (s.fxDeclared = {}))[c.iid] = true;
-      s.fxQueue = fx.map(e => ({ ...e, by: p, card: d.name, src: c.iid, bfAt, preBf: a.bf }));
+      s.fxQueue = [...(s.fxQueue || []), ...fx.map(e => ({ ...e, by: p, card: d.name, src: c.iid, bfAt, preBf: a.bf, fromHidden }))];
       runFx(s);
       return null;
     }
@@ -1180,11 +1211,11 @@ function act(s, a, who) {
       if (!A.some(isU) || !D.some(isU)) return 'Il faut des unités des deux côtés';
       // [Disarm N]: when attacking, an enemy unit here gets -N Might this turn (the strongest one)
       for (const c of A.filter(isU)) {
-        const n = auto(s, att) && R.kw(cd(s, c).text).disarm, t = n && D.filter(isU).sort((x, y) => hp(s, y, 'd') - hp(s, x, 'd'))[0];
+        const n = auto(s, att) && kwOf(s, c).disarm, t = n && D.filter(isU).sort((x, y) => hp(s, y, 'd') - hp(s, x, 'd'))[0];
         if (t) { t.tb = (t.tb || 0) - n; log(s, `${name(s, c)} désarme ${name(s, t)} (−${n} force ce tour).`); }
       }
       // combat damage (rule 465): each side assigns its total Might; Tank first, Backline last, stunned units deal none
-      const wrap = c => { const k = R.kw(cd(s, c).text); return { c, dmg: c.dmg || 0, stun: !!c.st, tank: k.tank || !!c.tt, backline: k.backline }; };
+      const wrap = c => { const k = kwOf(s, c); return { c, dmg: c.dmg || 0, stun: !!c.st, tank: k.tank || !!c.tt, backline: k.backline }; };
       const WA = A.filter(isU).map(wrap), WD = D.filter(isU).map(wrap);
       const before = { a: WA.filter(u => !u.stun).reduce((t, u) => t + hp(s, u.c, 'a'), 0), d: WD.filter(u => !u.stun).reduce((t, u) => t + hp(s, u.c, 'd'), 0) };
       const { deadA, deadD } = R.combat(WA, WD, u => hp(s, u.c, 'a'), u => hp(s, u.c, 'd'));
@@ -1339,4 +1370,12 @@ function viewFor(s, seat) {
   return v;
 }
 
-module.exports = { newState, apply, viewFor, hp, cd, other, runesOf, candidates, lethal, find };
+// can player p answer the stack now? (a [Reaction] card they can pay, a hidden card ready to flip, a [Reaction] ability)
+function canRespond(s, p) {
+  const pl = s.players[p], runes = runesOf(s, p), pool = pl.pool || newPool();
+  if (pl.zones.hand.some(c => { const d = cd(s, c); return R.kw(d.text).reaction && R.planCost(runes, pool, R.cardCost(d)); })) return true;
+  if (s.bfs.some(b => (b.hidden || []).some(c => c.owner === p && s.turn > (c.hidT || 0)))) return true;
+  return mineOnBoard(s, p).some(c => R.abilities(cd(s, c)).some(ab => ab.reaction && !c.ex));
+}
+
+module.exports = { canRespond, newState, apply, viewFor, hp, cd, other, runesOf, candidates, lethal, find };

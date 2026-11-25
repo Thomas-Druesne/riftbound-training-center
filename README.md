@@ -46,6 +46,8 @@ navigateur. Échoue si la partie s'arrête de bouger. À lancer après toute mod
 
 `node seed-legend-decks.js` ajoute un deck de test légal pour chaque légende qui n'en a pas (`data/decks.json`).
 
+`node import-decklists.js` reconstruit les decks : un par légende, nommé d'après la légende, au format tournoi (1 légende, 1 champion choisi, 39 cartes, 10 cartes de sideboard, 3 champs de bataille, 12 runes). Sources : les listes compétitives de `data/decklists/` ; une liste sans carte bannie est préférée, sinon les cartes bannies sont remplacées par des copies des cartes du deck principal (jamais par le sideboard).
+
 ## Organisation
 
 | Fichier | Rôle |

@@ -188,8 +188,15 @@ function aiNext(r, peek) {
 }
 // AI plays one action at a time with a pause so the animations stay readable. The action is chosen again when the
 // pause ends: the human may have played in between (a reaction on the stack...), and a stale choice would skip it.
+// a human in auto mode who has nothing to answer the AI's card with lets it resolve at once (no waiting on a click)
+function autoPass(r) {
+  const s = r.state, h = other(r.ai.seat), top = s.chain && s.chain[s.chain.length - 1];
+  if (!top || top.cb.by !== r.ai.seat || top.cb.seen || s.pending || !(s.auto || {})[h] || game.canRespond(s, h)) return false;
+  return !game.apply(s, { type: 'chainPass', seat: h, p: h });
+}
 function aiTick(r) {
   if (!r.ai || r.timer || !rooms.has(r.tag)) return;
+  if (autoPass(r)) broadcast(r);
   const first = aiNext(r, true);
   if (!first) return;
   r.timer = setTimeout(() => {

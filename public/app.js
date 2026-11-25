@@ -850,6 +850,7 @@ function renderGame() {
   // removed cards
   for (const [iid, el] of els) if (!seen.has(iid)) { el.remove(); els.delete(iid); }
 
+  placeOpHand();
   // FLIP: last, invert, play
   let moved = 0;
   for (const [iid, el] of els) {
@@ -1083,17 +1084,20 @@ function renderHud() {
   const v = S.v, H = $('#hud'); H.innerHTML = '';
   const kb = k => h('span', { class: 'kbd' }, k);
   const B = (label, fn, k, cls = '', title) => h('button', { class: 'btn sm ' + cls, onclick: fn, title: title || '' }, label, k ? kb(k) : null);
-  const aiTurn = v.ai && v.active === v.ai.seat && v.turn > 0 && !v.winner;
+  // the AI's turn, unless it is waiting for me (its card on the stack, my Focus in a showdown, my choice)
+  const topC = v.chain && v.chain[v.chain.length - 1];
+  const waitMe = (topC && topC.cb && topC.cb.by !== S.me && !topC.cb.seen) || (v.showdown && v.showdown.focus === S.me) || (v.pending && v.pending.to === S.me);
+  const aiTurn = v.ai && v.active === v.ai.seat && v.turn > 0 && !v.winner && !waitMe;
   H.classList.toggle('locked', !!aiTurn);
   const pre = v.stage !== 'main';
   const waitOther = v.pending && v.pending.to !== S.me;
   H.append(
-    h('div', { class: 'turninfo' }, pre ? 'Avant-partie' : `Tour ${v.turn}`, h('small', {}, pre ? STAGE_LABEL[v.stage] : waitOther ? h('span', { class: 'thinking' }, `${pname(v.pending.to)} choisit (${v.pending.card})`, h('i'), h('i'), h('i')) : aiTurn ? h('span', { class: 'thinking' }, `${pname(v.active)} réfléchit`, h('i'), h('i'), h('i')) : `${pname(v.active)} joue`)),
+    h('div', { class: 'turninfo' }, pre ? 'Avant-partie' : `Tour ${v.turn}`, h('small', {}, pre ? STAGE_LABEL[v.stage] : waitOther ? h('span', { class: 'thinking' }, `${pname(v.pending.to)} choisit (${v.pending.card})`, h('i'), h('i'), h('i')) : aiTurn ? h('span', { class: 'thinking' }, `${pname(v.active)} réfléchit`, h('i'), h('i'), h('i')) : waitMe && v.active !== S.me ? h('span', { class: 'yourmove' }, T('À vous de répondre')) : `${pname(v.active)} joue`)),
     scoreWidget(S.me), scoreWidget(other(S.me)), h('div', { class: 'sep' }),
     ...(pre ? [] : [
       B('Jeton', e => tokenMenu(e), 'J', '', 'Créer des jetons dans votre base (clic droit sur un champ de bataille pour les y créer)'),
       h('div', { class: 'sep' }),
-      B('🎲', () => send({ type: 'roll', sides: 6 }), '', '', 'Lancer un dé')]),
+      B('🎲', () => send({ type: 'roll', sides: 6 }), '', 'dicebtn', 'Lancer un dé')]),
     h('div', { class: 'grow' }),
     pre ? '' : undoBtn(),
     autoBtn(),
@@ -1235,7 +1239,15 @@ function drawArrows() {
     g.append(p);
   }
 }
-window.addEventListener('resize', () => drawArrows());
+window.addEventListener('resize', () => { drawArrows(); placeOpHand(); });
+// the opponent's hand hangs under the top bar, centred between the die button and "Annuler"
+function placeOpHand() {
+  const w = $('.handwrap.op'), board = $('#board'), a = $('.hud .dicebtn'), b = $('.hud .undobtn');
+  if (!w || !board) return;
+  const br = board.getBoundingClientRect();
+  const x = a && b ? (a.getBoundingClientRect().right + b.getBoundingClientRect().left) / 2 : br.left + br.width * 0.7;
+  w.style.left = Math.round(x - br.left) + 'px';
+}
 function swapSide() { if (S.seat !== 'solo') return; S.me = other(S.me); renderGame(); }
 
 /* ---------- preview ---------- */

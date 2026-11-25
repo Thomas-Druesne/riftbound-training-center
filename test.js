@@ -550,6 +550,38 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     assert.equal(g.find(s, 'baron').bf, 2, 'Baron enters Baron Pit');
     assert.ok(!g.candidates(s, other(P), { side: 'enemy', where: 'any' }).includes('baron'), 'not chosen by enemy spells');
   }
+  { // keywords on equipment are the unit's: [Ganking] from Blade of the Exile; [Action] only in showdowns on the
+    // opponent's turn; Elnuk Herd played from face down is recycled; Irresistible Faefolk pulls an enemy unit
+    const s = mk(), P = s.active, O = other(P), Z = s.players[P].zones;
+    for (const n of ['Blade of the Exile', 'Irresistible Faefolk']) s.cd[by(n).id] = by(n);
+    s.auto = { p1: false, p2: false };
+    const u = Z.main.find(c => g.cd(s, c).type === 'Unit' && !/Ganking/.test(g.cd(s, c).text || '')); Z.main.splice(Z.main.indexOf(u), 1); u.ex = false; s.bfs[0].units[P].push(u); s.bfs[0].ctrl = P;
+    assert.ok(g.apply(s, { type: 'move', seat: P, iid: u.iid, to: { bf: 1, side: P } }), 'no Ganking: no battlefield to battlefield move');
+    Z.base.push({ ...card(s, 'boe', 'Blade of the Exile', P), att: u.iid });
+    assert.equal(g.apply(s, { type: 'move', seat: P, iid: u.iid, to: { bf: 1, side: P } }), null, 'Blade of the Exile gives [Ganking]');
+    // [Action] spell on the opponent's turn, outside a showdown: refused
+    const act = all.find(c => c.type === 'Spell' && /^\[Action\]/.test(c.text || '') && !/\[Reaction\]/.test(c.text || ''));
+    s.cd[act.id] = act; s.players[O].zones.hand.push({ iid: 'act', cid: act.id, owner: O, ex: false, dmg: 0, buff: 0 });
+    assert.ok(g.apply(s, { type: 'play', seat: O, iid: 'act' }), '[Action] is not playable on the opponent\'s turn outside a showdown');
+    // Irresistible Faefolk moves to a battlefield: it may bring an enemy unit there
+    const e = s.players[O].zones.main.find(c => g.cd(s, c).type === 'Unit'); s.players[O].zones.main.splice(s.players[O].zones.main.indexOf(e), 1); s.players[O].zones.base.push(e);
+    Z.base.push(card(s, 'fae', 'Irresistible Faefolk', P));
+    assert.equal(g.apply(s, { type: 'move', seat: P, iid: 'fae', to: { bf: 0, side: P } }), null);
+    assert.equal(s.pending && s.pending.kind, 'target', 'Faefolk: choose an enemy unit');
+    assert.equal(g.apply(s, { type: 'resolve', seat: P, iids: [e.iid] }), null);
+    assert.equal(g.find(s, e.iid).bf, 0, 'the enemy unit is pulled to that battlefield');
+  }
+  { // Elnuk Herd played from face down: +3 to another unit, then recycled to the bottom of its owner's deck
+    const s = mk(), P = s.active, Z = s.players[P].zones;
+    s.auto = { p1: false, p2: false };
+    const u = Z.main.find(c => g.cd(s, c).type === 'Unit'); Z.main.splice(Z.main.indexOf(u), 1); s.bfs[0].units[P].push(u); s.bfs[0].ctrl = P;
+    Z.hand.push(card(s, 'el2', 'Elnuk Herd', P));
+    assert.equal(g.apply(s, { type: 'hide', seat: P, iid: 'el2', bf: 0 }), null);
+    s.turn++;
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'el2' }), null);
+    if (s.pending) g.apply(s, { type: 'resolve', seat: P, iids: [u.iid] });
+    assert.equal(Z.main[Z.main.length - 1].iid, 'el2', 'Elnuk Herd recycled');
+  }
   { // battlefields: Zaun Warrens on conquer (discard 1, then draw 1), Ruined Monastery ("you may": yes / no),
     // and only a reminder in the log in manual mode
     const bfGame = (bfName, autoMode) => {
