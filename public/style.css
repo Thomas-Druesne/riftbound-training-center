@@ -745,3 +745,23 @@ body.dragging-hidden .bf .bfhidden.me:empty::after { content: '?'; margin: auto;
 .options input[type=range] { accent-color: var(--gold); width: 100%; }
 .options .opt-lang { display: flex; gap: 8px; }
 .options .opt-mute { display: flex; gap: 8px; align-items: center; margin-top: 14px; color: var(--mut); cursor: pointer; }
+
+/* under a unit: its buff token and its equipment, peeking out below the card */
+.card:has(> .under), .card:has(> .bufftok) { isolation: isolate; }
+.card > .under { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.card > .under > .card { position: absolute; left: 12%; top: 24%; pointer-events: auto; }
+.card > .under > .card + .card { left: 24%; top: 34%; }
+.card > .under > .card:not(.ex) .in { transform: none; filter: none; } /* the unit's state (exhausted...) is not the gear's */
+.card > .under > .card:not(.sel):not(.targeted):not(.aimed) .in { box-shadow: 0 2px 8px #000e, 0 0 0 1px #ffe28a88; }
+.card > .bufftok { position: absolute; left: 50%; bottom: -15px; transform: translateX(-50%); z-index: -1; width: 30px; height: 30px; border-radius: 50%;
+  display: grid; place-items: end center; padding-bottom: 1px; box-sizing: border-box; font: 700 11px var(--f-cond); color: #fff; text-shadow: 0 1px 2px #000;
+  background: radial-gradient(circle at 40% 30%, #4fe8d8, #087a70); border: 2px solid #b0fff6; box-shadow: 0 2px 6px #000; }
+.card > .bufftok.neg { background: radial-gradient(circle at 40% 30%, #aaa, #444); border-color: #ddd; }
+/* battlefield: enemy Might above the card, mine (blue) below */
+.bf .bfcol { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.bf .might-sum:empty { visibility: hidden; }
+.bf .might-sum.op { color: var(--op); border-color: #e8405766; }
+.bf .might-sum.me { color: #4da3ff; border-color: #4da3ff66; }
+/* unit cards on a battlefield fit its height (two rows: enemy units above, mine below) */
+.bf { container-type: size; }
+.bf .units { --cw: min(76px, calc((50cqh - 10px) / 1.396)); min-height: 0; padding-top: 4px; padding-bottom: 4px; }

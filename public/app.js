@@ -700,8 +700,10 @@ function buildSkeleton() {
   const bfs = h('div', { class: 'bfrow' }, v.bfs.map((b, i) => h('div', { class: 'bf', 'data-bf': i },
     h('div', { class: 'units', 'data-drop': JSON.stringify({ bf: i, side: op }), 'data-z': `bf${i}:${op}` }),
     h('div', { class: 'mid' },
-      h('span', { class: 'might-sum op', 'data-ms': `${i}:${op}` }),
-      h('div', { class: 'bfcard slot', 'data-z': `bfc${i}`, style: 'padding:0;min-height:0;width:auto' }),
+      h('div', { class: 'bfcol' },
+        h('span', { class: 'might-sum op', 'data-ms': `${i}:${op}`, title: 'Force adverse ici' }),
+        h('div', { class: 'bfcard slot', 'data-z': `bfc${i}`, style: 'padding:0;min-height:0;width:auto' }),
+        h('span', { class: 'might-sum me', 'data-ms': `${i}:${me}`, title: 'Votre force ici' })),
 
       h('div', { class: 'bfctl' },
         h('button', { class: 'crest', title: 'Contrôle (clic : moi / clic droit : adversaire)', 'data-crest': i }, '⚑'),
@@ -711,8 +713,7 @@ function buildSkeleton() {
           else if (b.units.p1.length && b.units.p2.length) send({ type: 'fight', bf: i, att: b.units[S.me].length ? S.me : other(S.me) });
           else send({ type: 'conquer', bf: i });
           flashBf(i);
-        } }, '⚔')),
-      h('span', { class: 'might-sum me', 'data-ms': `${i}:${me}` })),
+        } }, '⚔'))),
     h('div', { class: 'units', 'data-drop': JSON.stringify({ bf: i, side: me }), 'data-z': `bf${i}:${me}` }),
     h('div', { class: 'bfhidden op', 'data-z': `bfh${i}:${op}`, title: 'Carte cachée (Hidden)' }),
     h('div', { class: 'bfhidden me', 'data-z': `bfh${i}:${me}`, 'data-drop': JSON.stringify({ hide: i }), title: 'Votre carte cachée (Hidden) : glissez ici une carte [Hidden] de votre main' }))));
@@ -744,6 +745,9 @@ function cardSig(c, faceDown) { return (faceDown || c.hidden || c.fd ? 'B' : c.c
 
 // equipment attached to a unit (gear stays in its controller's base with att = unit iid)
 const eqOn = c => ['p1', 'p2'].flatMap(p => S.v.players[p].zones.base.filter(g => g.att === c.iid));
+const mightShown = c => { const d = cardOf(c); return d && d.might != null && !c.fd ? d.might + (c.buff || 0) + (c.tb || 0) + eqOn(c).reduce((a, g) => a + ((cardOf(g) || {}).might || 0), 0) : 0; };
+// equipment drawn under its unit (it stays in its controller's base in the rules; shown there again once detached)
+const attachedShown = g => { if (!g.att) return false; const L = locate(g.att); return !!L && (L.zone === 'base' || L.bf != null); };
 function syncCard(c, faceDown, extraCls, zone) {
   let el = els.get(c.iid);
   if (!el) {
@@ -755,7 +759,7 @@ function syncCard(c, faceDown, extraCls, zone) {
   const back = sig.startsWith('B') || !data;
   if (el.dataset.sig !== sig) {
     const wasBack = el.dataset.sig && el.dataset.sig.startsWith('B');
-    const inn = el.querySelector('.in');
+    const inn = el.querySelector(':scope > .in');
     inn.innerHTML = '';
     if (!back) inn.append(...cardFace(data));
     if (el.dataset.sig && wasBack !== back) inn.animate([{ transform: 'rotateY(90deg)' }, { transform: 'rotateY(0)' }], { duration: 300, easing: 'ease-out' });
@@ -764,15 +768,18 @@ function syncCard(c, faceDown, extraCls, zone) {
   if (back) delete el.dataset.cid; else el.dataset.cid = data.id;
   el.className = `card ${back ? 'back ' + backKind(data, zone) : ''} ${data && data.landscape ? 'landscape' : ''} ${c.ex ? 'ex' : ''} ${S.sel === c.iid ? 'sel' : ''} ${extraCls || ''}`;
   // badges
-  const bd = el.querySelector('.badges'); bd.innerHTML = '';
+  const bd = el.querySelector(':scope > .badges'); bd.innerHTML = '';
+  let tok = el.querySelector(':scope > .bufftok');
+  if (c.buff && !back && !c.fd) {
+    if (!tok) { tok = h('div', { class: 'bufftok' }); el.prepend(tok); }
+    tok.className = 'bufftok' + (c.buff < 0 ? ' neg' : ''); tok.textContent = (c.buff > 0 ? '+' : '') + c.buff; tok.title = 'Buff';
+  } else if (tok) tok.remove();
   // a face-down card shows nothing about itself (not even to its owner: the opponent may be looking at the screen)
   if (back || c.fd) { if (/hiddencard/.test(extraCls || '')) bd.append(h('span', { class: 'badge hid' }, T('CACHÉE'))); return el; }
   if (c.dmg) bd.append(h('span', { class: 'badge dmg' }, c.dmg));
-  if (c.buff) bd.append(h('span', { class: 'badge buff' + (c.buff < 0 ? ' neg' : '') }, (c.buff > 0 ? '+' : '') + c.buff));
   const eq = eqOn(c);
-  if ((c.buff || c.tb || eq.length) && data && data.might != null) bd.append(h('span', { class: 'badge might' }, '⚔' + (data.might + (c.buff || 0) + (c.tb || 0) + eq.reduce((t, g) => t + ((cardOf(g) || {}).might || 0), 0))));
-  if (eq.length) bd.append(h('span', { class: 'badge equip', title: eq.map(g => (cardOf(g) || {}).name).join(', ') }, '⚙ ' + eq.length));
-  if (c.att) { const u = locate(c.att); bd.append(h('span', { class: 'badge equip' }, '⚙ ' + (u && cardOf(u.c) ? cardOf(u.c).name.split(',')[0] : 'attaché'))); }
+  if ((c.buff || c.tb || eq.length) && data && data.might != null) bd.append(h('span', { class: 'badge might' }, '⚔' + mightShown(c)));
+  if (c.att && !attachedShown(c)) { const u = locate(c.att); bd.append(h('span', { class: 'badge equip' }, '⚙ ' + (u && cardOf(u.c) ? cardOf(u.c).name.split(',')[0] : 'attaché'))); }
   if (c.emp) bd.append(h('span', { class: 'badge emp' }, T('RENFORCÉE')));
   if (data && data.supertype === 'Token') el.classList.add('token');
   if (c.rev) bd.append(h('span', { class: 'badge rev' }, T('RÉVÉLÉE')));
@@ -804,7 +811,7 @@ function renderGame() {
   for (const p of ['p1', 'p2']) {
     const z = v.players[p].zones;
     fill(p + ':hand', z.hand);
-    fill(p + ':base', z.base); fill(p + ':runes', z.runes);
+    fill(p + ':base', z.base.filter(c => !attachedShown(c))); fill(p + ':runes', z.runes);
     fill(p + ':legend', z.legend); fill(p + ':champion', z.champion);
     for (const k of ['main', 'runeDeck']) fill(p + ':' + k, z[k], { back: true, stack: true });
     for (const k of ['trash', 'banish']) fill(p + ':' + k, z[k], { stack: true });
@@ -825,12 +832,21 @@ function renderGame() {
     for (const p of ['p1', 'p2']) {
       fill(`bf${i}:${p}`, b.units[p]);
       const ms = $(`[data-ms="${i}:${p}"]`);
-      if (ms) { const sum = b.units[p].reduce((a, c) => { const d = cardOf(c); return a + (d && d.might != null && !c.fd ? d.might + (c.buff || 0) : 0); }, 0); ms.textContent = b.units[p].length ? '⚔ ' + sum : ''; }
+      if (ms) ms.textContent = b.units[p].length ? '⚔ ' + b.units[p].reduce((a, c) => a + mightShown(c), 0) : '';
     }
     const bfel = $(`[data-bf="${i}"]`);
     bfel.classList.toggle('ctrl-me', b.ctrl === S.me); bfel.classList.toggle('ctrl-op', !!b.ctrl && b.ctrl !== S.me);
     const cr = $(`[data-crest="${i}"]`); cr.className = 'crest ' + (b.ctrl ? (b.ctrl === S.me ? 'me' : 'op') : '');
   });
+  // equipment under its unit
+  for (const p of ['p1', 'p2']) for (const g of v.players[p].zones.base.filter(attachedShown)) {
+    const u = els.get(g.att); if (!u) continue;
+    seen.add(g.iid);
+    const gel = syncCard(g, false, 'undergear', 'gear');
+    let box = u.querySelector(':scope > .under');
+    if (!box) { box = h('div', { class: 'under' }); u.prepend(box); }
+    if (gel.parentElement !== box) box.append(gel);
+  }
   // removed cards
   for (const [iid, el] of els) if (!seen.has(iid)) { el.remove(); els.delete(iid); }
 
@@ -838,7 +854,7 @@ function renderGame() {
   let moved = 0;
   for (const [iid, el] of els) {
     const a = origin.get(iid) || first.get(iid);
-    if (!a) continue;
+    if (!a || (el.parentElement && el.parentElement.closest('.card'))) continue;
     const b = el.getBoundingClientRect();
     const dx = a.left - b.left, dy = a.top - b.top, sx = a.width / b.width, sy = a.height / b.height;
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < .02) continue;

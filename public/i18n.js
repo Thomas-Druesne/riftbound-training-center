@@ -58,7 +58,7 @@ const EN = {
   'Mode': 'Mode', 'auto': 'auto', 'manuel': 'manual', 'Piocher': 'Draw', 'Canaliser': 'Channel', 'Redresser tout': 'Ready all', 'Fin de tour': 'End turn',
   'Passe la main. Le tour suivant démarre seul : unités et runes redressées, points de tenue, 2 runes canalisées, 1 carte piochée.':
     'Pass the turn. The next turn starts by itself: units and runes readied, hold points, 2 runes channeled, 1 card drawn.',
-  'Son': 'Sound', 'Options': 'Options',
+  'Son': 'Sound', 'Options': 'Options', 'Force adverse ici': 'Enemy Might here', 'Votre force ici': 'Your Might here', 'Buff': 'Buff',
   // stack, prompts
   'champ de bataille': 'battlefield', ' (la vôtre)': ' (yours)', 'Son effet s’applique à la résolution.': 'Its effect applies on resolution.',
   'Effet non géré : appliquez-le à la main, puis :': 'Effect not handled: apply it by hand, then:',
