@@ -1,6 +1,6 @@
 # Riftbound Training Center
 
-Simulateur local du jeu de cartes Riftbound : partie contre une IA (facile / normale / difficile) ou contre un joueur (même PC ou réseau local).
+Simulateur local du jeu de cartes Riftbound : partie contre une IA (adversaire débutant / adversaire confirmé / Pro Player) ou contre un joueur (même PC ou réseau local).
 
 ## Lancer
 

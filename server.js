@@ -105,7 +105,7 @@ const AI = require('./ai');
 const other = game.other;
 const rooms = new Map();
 const TAG_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const LEVELS = { easy: 'IA Facile', normal: 'IA Normale', hard: 'IA Difficile' };
+const LEVELS = { easy: 'Adversaire débutant', normal: 'Adversaire confirmé', hard: 'Pro Player' };
 
 function newTag() {
   let t;

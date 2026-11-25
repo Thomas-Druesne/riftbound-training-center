@@ -484,9 +484,9 @@ const ICONS = {
     <path d="M40 6h-6L14 26l6 6 20-20Z" fill="currentColor" fill-opacity=".15"/><path d="M20 32l4 4M14 26l-4-4M17 35l-7 7M13 31l-7 7"/></svg>`,
 };
 const LEVELS = [
-  ['easy', 'Facile', 'Joueur débutant : joue au hasard, gaspille ses runes, attaque sans réfléchir.'],
-  ['normal', 'Normal', 'Joueur confirmé : courbe de mana propre, échanges favorables, prend les champs libres.'],
-  ['hard', 'Difficile', 'Joueur pro : calcule toutes les attaques possibles et la riposte adverse, optimise chaque rune.'],
+  ['easy', 'Adversaire débutant', 'Joue au hasard, gaspille ses runes, attaque sans réfléchir.'],
+  ['normal', 'Adversaire confirmé', 'Lance ses sorts au bon moment, contre et réagit en combat, prend les champs de bataille.'],
+  ['hard', 'Pro Player', 'Calcule toutes les attaques possibles et la riposte adverse, optimise chaque rune.'],
 ];
 S.mode = store.get('mode', 'ai'); S.level = store.get('level', 'normal');
 async function renderLobby() {
