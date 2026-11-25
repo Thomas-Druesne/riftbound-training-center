@@ -188,7 +188,7 @@ function resolveTop(s) {
   log(s, `${d.name} (${seatName(s, p)}) se résout.`);
   let fx = R.playFx(d, { legion: cb.legion, xp: s.players[p].xp || 0 });
   if (cb.apply === false) fx = fx.filter(e => e.who === 'opp');
-  else if (cb.repeat) fx = [...fx, ...fx];
+  else if (cb.repeat) fx = [...fx, ...fx.map(e => ({ ...e, grp: 1 }))];
   (s.fxPre || (s.fxPre = {}))[c.iid] = (cb.targets || []).slice();
   if ((cb.targets || []).length) (s.fxDeclared || (s.fxDeclared = {}))[c.iid] = true;
   s.fxQueue = [...fx.map(e => ({ ...e, by: p, card: d.name, src: c.iid, preBf: cb.bf })), ...(s.fxQueue || [])];
@@ -207,7 +207,7 @@ const unitsOf = (s, p) => [...s.players[p].zones.base, ...s.bfs.flatMap(b => b.u
 function runFx(s) {
   s.fxRun = true;
   try { runFxLoop(s); } finally { s.fxRun = false; }
-  if (!s.pending && !(s.fxQueue && s.fxQueue.length)) { delete s.fxPre; delete s.fxDeclared; delete s.fxMark; }
+  if (!s.pending && !(s.fxQueue && s.fxQueue.length)) { delete s.fxPre; delete s.fxDeclared; delete s.fxMark; delete s.fxHit; }
 }
 function runFxLoop(s) {
   while (s.fxQueue && s.fxQueue.length && !s.pending) {
@@ -224,7 +224,11 @@ function runFxLoop(s) {
       s.chain.pop(); delete t.cb; toTrash(s, t); log(s, `${name(s, t)} est contré (${e.card}).`);
     }
     else if (e.kind === 'target') {
-      const opts = candidates(s, to, e).filter(id => !deflectBlocked(s, to, id) && !(e.op === 'duel' && id === s.fxMark));
+      let opts = candidates(s, to, e).filter(id => !deflectBlocked(s, to, id) && !(e.op === 'duel' && id === s.fxMark));
+      // "different units" / "at the same location": compared with the units this card already chose
+      const hit = (s.fxHit || {})[e.src + '#' + (e.grp || 0)];
+      if (hit && e.distinct) opts = opts.filter(id => !hit.ids.includes(id));
+      if (hit && e.sameLoc && hit.loc) opts = opts.filter(id => locOf(s, id) === hit.loc);
       if (!opts.length) { log(s, `${e.card} : aucune cible valide.`); continue; }
       const pre = s.fxPre && s.fxPre[e.src], k = pre ? pre.findIndex(id => opts.includes(id)) : -1;
       const lost = pre && k < 0 ? pre.findIndex(id => String(id).startsWith('gone:')) : -1;
@@ -347,7 +351,12 @@ function payDeflect(s, p, iid) {
   const n = f && f.p !== p ? R.kw(cd(s, f.c).text).deflect : 0;
   if (n && pay(s, p, { e: 0, p: Array(n).fill(null) })) log(s, `${seatName(s, p)} paie ${n} puissance (Deflect de ${name(s, f.c)}).`);
 }
+const locOf = (s, iid) => { const f = find(s, iid); return f ? (f.zone === 'bf' ? 'bf' + f.bf : f.zone === 'base' ? 'base:' + f.p : null) : null; };
 function applyTarget(s, e, iid, p) {
+  if (e.src) { // remember the units this card chose (different units / same location)
+    const k = e.src + '#' + (e.grp || 0), h = (s.fxHit || (s.fxHit = {}))[k] || (s.fxHit[k] = { ids: [], loc: locOf(s, iid) });
+    h.ids.push(iid);
+  }
   payDeflect(s, p, iid);
   const f = find(s, iid); if (!f) return;
   const c = f.c, N = name(s, c), src = e.card ? ` (${e.card})` : '';

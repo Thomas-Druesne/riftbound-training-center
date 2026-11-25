@@ -423,6 +423,27 @@ assert.equal(s.bfs[1].ctrl, 'p2', 'undo restores the combat');
     assert.ok(t.bfs[1].units.p1.some(c => c.iid === 'rg') && t.showdown && t.showdown.att === 'p1', 'he attacks there');
   }
 }
+{ // Bellows Breath: 1 damage to up to three DIFFERENT units at the SAME location
+  const real = fs.existsSync('./data/cards.json') ? require('./data/cards.json') : null;
+  const bb = real && real.find(c => c.name === 'Bellows Breath');
+  if (bb) {
+    const t = newGame(deck('B1'), deck('B2'), [...cards, bb]);
+    pregame(t, { p1: () => [], p2: () => [] });
+    t.cd[bb.id] = bb; t.auto = {}; t.active = 'p1'; t.started = t.turn;
+    const mkc = (id, cid, who) => ({ iid: id, cid, owner: who, ex: false, dmg: 0, buff: 0 });
+    t.bfs[0].units.p2.push(mkc('x1', 'C', 'p2'), mkc('x2', 'C', 'p2')); t.bfs[1].units.p2.push(mkc('y1', 'C', 'p2'));
+    t.players.p1.zones.hand.push(mkc('bb', bb.id, 'p1'));
+    assert.equal(g.apply(t, { type: 'play', seat: 'p1', iid: 'bb' }), null);
+    g.apply(t, { type: 'chainPass', seat: 'p2' });
+    assert.equal(t.pending.kind, 'target');
+    assert.equal(g.apply(t, { type: 'resolve', seat: 'p1', iids: ['x1'] }), null);
+    assert.deepEqual(t.pending.opts, ['x2'], 'second hit: another unit, same battlefield');
+    assert.ok(g.apply(t, { type: 'resolve', seat: 'p1', iids: ['x1'] }), 'not the same unit twice');
+    assert.equal(g.apply(t, { type: 'resolve', seat: 'p1', iids: ['x2'] }), null);
+    assert.ok(!t.pending, 'no third unit there: done');
+    assert.deepEqual([t.bfs[0].units.p2.map(c => c.dmg), t.bfs[1].units.p2[0].dmg], [[1, 1], 0]);
+  }
+}
 console.log('reducer OK');
 
 /* ---- AI vs AI on real data ---- */

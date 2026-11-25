@@ -340,15 +340,23 @@ function kindValue(s, me, e) {
   return 0;
 }
 // Plan a card's play effects for `me`: total value, the targets to declare, the battlefield to name.
-function fxPlan(s, me, d, src) {
+// 'at the same location' effects: plan once per location and keep the best
+function fxPlan(s, me, d, src, loc) {
   const fx = R.playFx(d, { legion: (s.played && s.played[me]) > 0, xp: s.players[me].xp || 0 });
+  if (loc === undefined && fx.some(e => e.sameLoc)) {
+    const at = id => { const f = G.find(s, id); return f && (f.zone === 'bf' ? 'bf' + f.bf : 'base:' + f.p); };
+    const locs = [...new Set(G.candidates(s, me, { ...fx.find(e => e.sameLoc), src }).map(at))];
+    return locs.map(l => fxPlan(s, me, d, src, l)).sort((a, b) => b.v - a.v)[0] || fxPlan(s, me, d, src, null);
+  }
   const sim = { dmg: new Map(), gone: new Set(), mark: null }, targets = [];
   let v = 0, bf;
   const copy = x => ({ dmg: new Map(x.dmg), gone: new Set(x.gone), mark: x.mark });
   for (let i = 0; i < fx.length; i++) {
     const e = { ...fx[i], src };
     if (e.kind !== 'target') { v += kindValue(s, me, e); if (e.bestBf != null) bf = e.bestBf; continue; }
-    const opts = G.candidates(s, me, e).filter(id => e.op === 'dmg' || !targets.includes(id));
+    let opts = G.candidates(s, me, e).filter(id => (e.op === 'dmg' && !e.distinct) || !targets.includes(id));
+    const locOf = id => { const f = G.find(s, id); return f && (f.zone === 'bf' ? 'bf' + f.bf : 'base:' + f.p); };
+    if (e.sameLoc && (loc || targets.length)) opts = opts.filter(id => locOf(id) === (loc || locOf(targets[0])));
     if (e.op === 'mark' && fx[i + 1] && fx[i + 1].op === 'duel') { // choose the pair together
       let best = null;
       for (const a of opts) for (const b of G.candidates(s, me, { ...fx[i + 1], src })) {
@@ -652,7 +660,7 @@ function trickPlan(s, m, i, att, me, d, src) {
     if (e.kind !== 'target') { if (['aoeAll', 'bfBuff', 'allMight'].includes(e.kind)) simFx(t, i, me, e); continue; }
     let best = null;
     for (const id of G.candidates(s, me, e)) {
-      if (targets.includes(id) && e.op !== 'dmg') continue;
+      if (targets.includes(id) && (e.op !== 'dmg' || e.distinct)) continue;
       const u = clone(t);
       if (!simFx(u, i, me, e, id)) continue;
       const v = fightValue(u, i, att, me);

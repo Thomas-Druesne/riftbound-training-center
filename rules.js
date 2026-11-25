@@ -65,11 +65,11 @@ const TARGETED = [
 const T = (op, o = {}) => ({ kind: 'target', who: 'self', op, n: 0, side: 'any', where: 'any', max: null, ...o });
 const CARD_FX = {
   'Avalanche': [{ kind: 'aoeAll', n: 3, scope: 'base', side: 'all' }],
-  'Back to Back': [T('might', { n: 2, side: 'friendly' }), T('might', { n: 2, side: 'friendly' })],
-  'Bellows Breath': [T('dmg', { n: 1, opt: true }), T('dmg', { n: 1, opt: true }), T('dmg', { n: 1, opt: true })],
+  'Back to Back': [T('might', { n: 2, side: 'friendly', distinct: true }), T('might', { n: 2, side: 'friendly', distinct: true })],
+  'Bellows Breath': [1, 2, 3].map(() => T('dmg', { n: 1, opt: true, distinct: true, sameLoc: true })),
   'Block': [T('shield', { n: 3, tank: true })],
   'Blood Rush': [T('assault', { n: 2 })],
-  'Bonds of Strength': [T('might', { n: 1, side: 'friendly' }), T('might', { n: 1, side: 'friendly' })],
+  'Bonds of Strength': [T('might', { n: 1, side: 'friendly', distinct: true }), T('might', { n: 1, side: 'friendly', distinct: true })],
   'Brawl': [T('assault', { n: 'might' })],
   'Cannon Barrage': [{ kind: 'aoeAll', n: 2, scope: 'combat', side: 'enemy' }],
   'Challenge': [T('mark', { side: 'friendly' }), T('duel', { side: 'enemy' })],
@@ -92,7 +92,7 @@ const CARD_FX = {
   'Existential Dread': [T('stun', { side: 'enemy', where: 'attacking' })],
   'Thwonk!': [T('stun', { where: 'attacking' })],
   'Fight or Flight': [T('recall', { where: 'bf' })],
-  'Flash': [T('recall', { side: 'friendly', where: 'bf', opt: true }), T('recall', { side: 'friendly', where: 'bf', opt: true })],
+  'Flash': [T('recall', { side: 'friendly', where: 'bf', opt: true, distinct: true }), T('recall', { side: 'friendly', where: 'bf', opt: true, distinct: true })],
   'Flurry of Blades': [{ kind: 'aoeAll', n: 1, scope: 'bf', side: 'all' }],
   'For Demacia!': [{ kind: 'bfBuff', shield: 2, mine: true }],
   'Siphon Power, Viktor': [{ kind: 'bfBuff', friendly: 1, enemy: -1 }],
@@ -103,7 +103,7 @@ const CARD_FX = {
   'Dominus': [T('double')],
   'On the Hunt': [{ kind: 'readyAll' }],
   'Raucous Anthem': [{ kind: 'readyAll' }, { kind: 'allMight', n: 3 }],
-  'Piercing Light': [T('dmg', { n: 2, where: 'bf' }), T('dmg', { n: 2, opt: true })],
+  'Piercing Light': [T('dmg', { n: 2, where: 'bf', distinct: true }), T('dmg', { n: 2, opt: true, distinct: true })],
   'Portal Rescue': [T('blink', { side: 'friendly', to: 'base' })],
   'Thrill of the Hunt': [T('blink', { side: 'friendly', to: 'any' })],
   'Temporal Breach': [T('blink', { to: 'same' })],
@@ -111,7 +111,7 @@ const CARD_FX = {
   'Right of Conquest': [{ kind: 'draw', n: 1, per: 'bfCtrl' }],
   'Scorched Earth': [T('dmg', { n: 5, where: 'bf' })],
   'Show of Strength': [{ kind: 'draw', n: 0, per: 'mighty' }],
-  'Singularity': [T('dmg', { n: 6, opt: true }), T('dmg', { n: 6, opt: true })],
+  'Singularity': [T('dmg', { n: 6, opt: true, distinct: true }), T('dmg', { n: 6, opt: true, distinct: true })],
   'Star-Crossed': [T('hand', { side: 'friendly' }), T('hand', { side: 'enemy' })],
   'Thermo Beam': [{ kind: 'killGearAll' }],
   'Twilight Step': [T('recall', { where: 'bf', max: 3 })],
@@ -197,9 +197,9 @@ function playFx(card, ctx = {}) {
   if ((m = /\bgive your other units( here)? ([+-]\d+) :rb_might: this turn/i.exec(t))) add(m.index, { kind: 'allMight', n: +m[2], who: 'self', notSelf: true, here: !!m[1] });
   if ((m = /\bgive enemy units( here)? ([+-−–]\d+) :rb_might: this turn(,? to a minimum of 1)?/i.exec(t))) add(m.index, { kind: 'allMight', n: -Math.abs(+m[2].replace(/[−–]/, '-')), who: 'self', enemy: true, here: !!m[1], min: m[3] ? 1 : null });
   // "deal 1 to each of up to 2 units", "deal 2 to up to two enemy units"
-  if ((m = /\bdeal (\d+) to (?:each of )?up to (\w+) (enemy |friendly )?units?( at a battlefield| here)?/i.exec(t))) {
+  if ((m = /\bdeal (\d+) to (?:each of )?up to (\w+) (enemy |friendly )?units?( at a battlefield| here| at the same location)?/i.exec(t))) {
     const k = NUM[m[2].toLowerCase()] || +m[2] || 1;
-    for (let i = 0; i < k; i++) add(m.index + i / 10, { kind: 'target', who: 'self', op: 'dmg', n: +m[1], side: /enemy/i.test(m[3] || '') ? 'enemy' : /friendly/i.test(m[3] || '') ? 'friendly' : 'any', where: /battlefield/.test(m[4] || '') ? 'bf' : /here/.test(m[4] || '') ? 'here' : 'any', max: null, opt: true });
+    for (let i = 0; i < k; i++) add(m.index + i / 10, { kind: 'target', who: 'self', op: 'dmg', n: +m[1], side: /enemy/i.test(m[3] || '') ? 'enemy' : /friendly/i.test(m[3] || '') ? 'friendly' : 'any', where: /battlefield/.test(m[4] || '') ? 'bf' : /here/.test(m[4] || '') ? 'here' : 'any', max: null, opt: true, distinct: true, sameLoc: /same location/.test(m[4] || '') });
   }
   if ((m = /\breturn all units with (\d+) :rb_might: or less to their owners'? hands/i.exec(t))) add(m.index, { kind: 'massBounce', max: +m[1], who: 'self' });
   if ((m = /\breturn another friendly unit and an enemy unit to their owners'? hands/i.exec(t))) {
