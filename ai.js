@@ -289,7 +289,7 @@ function movesToActs(s, me, moves) {
 
 /* ---------------- card evaluation (normal / hard) ---------------- */
 const unitsAll = (s, p) => [...s.players[p].zones.base, ...s.bfs.flatMap(b => b.units[p])].filter(c => isUnit(s, c));
-const COMBAT_OPS = ['might', 'assault', 'shield', 'double', 'tank', 'blink', 'moveTo', 'mark', 'duel', 'stun'];
+const COMBAT_OPS = ['might', 'assault', 'shield', 'double', 'tank', 'blink', 'moveTo', 'mark', 'duel', 'stun', 'swap', 'setMight', 'kwTurn', 'swapPlaces'];
 // what a unit on the board is worth to its controller: Might, + holding a battlefield alone / controlling it
 function worth(s, c) {
   const f = G.find(s, c.iid); if (!f) return 0;
@@ -376,7 +376,7 @@ function fxPlan(s, me, d, src, loc) {
     let opts = G.candidates(s, me, e).filter(id => (e.op === 'dmg' && !e.distinct) || !targets.includes(id));
     const locOf = id => { const f = G.find(s, id); return f && (f.zone === 'bf' ? 'bf' + f.bf : 'base:' + f.p); };
     if (e.sameLoc && (loc || targets.length)) opts = opts.filter(id => locOf(id) === (loc || locOf(targets[0])));
-    if (e.op === 'mark' && fx[i + 1] && fx[i + 1].op === 'duel') { // choose the pair together
+    if (e.op === 'mark' && fx[i + 1] && ['duel', 'swap'].includes(fx[i + 1].op)) { // choose the pair together
       let best = null;
       for (const a of opts) for (const b of G.candidates(s, me, { ...fx[i + 1], src })) {
         if (a === b) continue;
@@ -505,6 +505,11 @@ function pregame(s, me, level) {
 function answer(s, me, level) {
   const q = s.pending;
   if (q.kind === 'confirm') return { type: 'resolve', yes: q.ai !== false }; // battlefield "you may": take it
+  if (q.kind === 'pick') { // the most expensive card offered
+    const z = s.players[me].zones, cs = q.cards.map(id => [...z.trash, ...z.main].find(c => c.iid === id)).filter(Boolean);
+    const best = cs.sort((a, b) => ((G.cd(s, b).energy || 0) + (G.cd(s, b).power || 0)) - ((G.cd(s, a).energy || 0) + (G.cd(s, a).power || 0)))[0];
+    return { type: 'resolve', iids: best ? [best.iid] : [] };
+  }
   if (q.kind === 'discard') {
     const runes = s.players[me].zones.runes.length;
     const worth = c => {
@@ -668,6 +673,8 @@ function simFx(t, i, me, e, id) {
     else if (['kill', 'hand', 'deck', 'recall'].includes(e.op)) { b.u[side].splice(b.u[side].indexOf(u), 1); if (e.op === 'recall') t.base[side].push(u); }
     else if (e.op === 'mark') t.mark = u;
     else if (e.op === 'duel') { const a = t.mark; if (!a || a === u) return false; a.dmg += u.m; u.dmg += a.m; }
+    else if (e.op === 'swap') { const a = t.mark; if (!a || a === u) return false; [a.m, u.m] = [u.m, a.m]; }
+    else if (e.op === 'setMight') u.m = e.n;
     else return false;
   }
   for (const p of [me, other(me)]) b.u[p] = b.u[p].filter(x => x.dmg < Math.max(1, x.m));
@@ -678,6 +685,15 @@ function trickPlan(s, m, i, att, me, d, src) {
   const fx = R.playFx(d);
   if (!fx.length || fx.some(e => ['counter', 'wipe', 'wheel', 'killGearAll'].includes(e.kind))) return null;
   let t = clone(m); const targets = [];
+  if (fx.length === 2 && fx[0].op === 'mark' && ['duel', 'swap'].includes(fx[1].op)) {
+    let best = null;
+    for (const a of G.candidates(s, me, { ...fx[0], src })) for (const b of G.candidates(s, me, { ...fx[1], src })) {
+      if (a === b) continue;
+      const u = clone(t); if (!simFx(u, i, me, fx[0], a) || !simFx(u, i, me, fx[1], b)) continue;
+      const v = fightValue(u, i, att, me); if (!best || v > best.v) best = { v, ids: [a, b] };
+    }
+    return best && { v: best.v, targets: best.ids };
+  }
   for (const e0 of fx) {
     const e = { ...e0, src };
     if (e.kind !== 'target') { if (['aoeAll', 'bfBuff', 'allMight'].includes(e.kind)) simFx(t, i, me, e); continue; }

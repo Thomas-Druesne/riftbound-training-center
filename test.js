@@ -300,7 +300,7 @@ assert.equal(s.bfs[1].ctrl, 'p2', 'undo restores the combat');
   u.cd.S = cs[6]; u.active = 'p2'; u.players.p2.zones.hand = [mkc('y1', 'S', 'p2')];
   u.bfs[0].units.p1.push(mkc('e1', 'C', 'p1'), mkc('e2', 'U', 'p1'));
   let cast = null;
-  for (let i = 0; i < 20 && !cast; i++) { const a = AI.next(u, 'p2', 'hard', {}); if (!a) break; if (a.type === 'play' && a.iid === 'y1') cast = a; else break; }
+  for (let i = 0; i < 20 && !cast; i++) { const a = AI.next(u, 'p2', 'normal', {}); if (!a) break; if (a.type === 'play' && a.iid === 'y1') cast = a; else break; }
   assert.ok(cast, 'the AI casts the spell'); assert.deepEqual(cast.targets.length, 2, 'two targets declared');
 }
 { // card effects from the per-card table, on the real card texts
@@ -537,6 +537,43 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     assert.equal(g.apply(s, { type: 'resolve', seat: P, iids: [top[0]] }), null);
     assert.equal(Z.main[Z.main.length - 1].iid, top[0], 'recycled to the bottom');
   }
+  { // Switcheroo hidden at my battlefield; a bigger enemy unit attacks; flipped in the showdown it swaps the Mights
+    const s = mk(), H = 'p1', A = 'p2';
+    for (const n of ['Switcheroo', 'Tideturner', 'Fizz, Trickster']) s.cd[by(n).id] = by(n);
+    s.auto = { p1: true, p2: true };
+    const unit = (p, id, m) => { const z = s.players[p].zones, c = z.main.find(x => g.cd(s, x).type === 'Unit'); z.main.splice(z.main.indexOf(c), 1); c.iid = id; s.cd['M' + m] = { ...g.cd(s, c), might: m, text: '' }; c.cid = 'M' + m; return c; };
+    const mine = unit(H, 'small', 2), big = unit(A, 'big', 6);
+    s.bfs[0].units[H].push(mine); s.bfs[0].ctrl = H;
+    s.bfs[0].hidden = [{ ...card(s, 'sw', 'Switcheroo', H), fd: true, hidT: 1 }];
+    s.active = A; s.turn = 5; big.ex = false; s.players[A].zones.base.push(big);
+    assert.equal(g.apply(s, { type: 'move', seat: A, iid: 'big', to: { bf: 0, side: A } }), null);
+    assert.ok(s.showdown, 'showdown');
+    if (s.showdown.focus === A) g.apply(s, { type: 'pass', seat: A });
+    assert.equal(g.apply(s, { type: 'play', seat: H, iid: 'sw', targets: ['small', 'big'] }), null, 'the hidden Switcheroo is cast');
+    g.apply(s, { type: 'chainPass', seat: A }); if (s.chain.length) g.apply(s, { type: 'chainResolve', seat: H });
+    assert.deepEqual([g.hp(s, mine), g.hp(s, big)], [6, 2], 'Mights swapped');
+    while (s.showdown) { const f = s.showdown.focus; assert.equal(g.apply(s, { type: 'pass', seat: f }), null); }
+    assert.deepEqual([g.find(s, 'small').zone, g.find(s, 'big').zone], ['bf', 'trash'], 'my unit survives, theirs dies');
+  }
+  { // Tideturner swaps places with a friendly unit; Fizz casts a spell from the trash for free, then recycles it
+    const s = mk(), P = s.active, Z = s.players[P].zones;
+    for (const n of ['Tideturner', 'Fizz, Trickster', 'Switcheroo']) s.cd[by(n).id] = by(n);
+    s.auto = { p1: true, p2: true }; Z.runes.forEach(r => (r.ex = false));
+    const u = Z.main.find(c => g.cd(s, c).type === 'Unit'); Z.main.splice(Z.main.indexOf(u), 1); Z.base.push(u);
+    s.bfs[0].ctrl = P; s.bfs[0].hidden = [{ ...card(s, 'tt', 'Tideturner', P), fd: true, hidT: 0 }]; s.turn = 3;
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'tt', targets: [u.iid] }), null);
+    if (s.pending && s.pending.kind === 'target') g.apply(s, { type: 'resolve', seat: P, iids: [u.iid] });
+    assert.equal(g.find(s, 'tt').zone, 'base'); assert.equal(g.find(s, u.iid).bf, 0, 'places swapped');
+    Z.trash.push(card(s, 'sw2', 'Switcheroo', P)); Z.hand.push(card(s, 'fz', 'Fizz, Trickster', P));
+    while (Z.runes.length < 6) Z.runes.push({ ...Z.runes[0], iid: 'xr' + Z.runes.length });
+    Z.runes.forEach(r => (r.ex = false)); s.players[P].pool = { e: 9, p: ['any', 'any', 'any'] };
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'fz' }), null);
+    assert.equal(s.pending && s.pending.kind, 'pick');
+    assert.equal(g.apply(s, { type: 'resolve', seat: P, iids: ['sw2'] }), null);
+    assert.equal(s.chain[s.chain.length - 1].iid, 'sw2', 'Switcheroo cast from the trash');
+    g.apply(s, { type: 'chainPass', seat: other(P) }); g.apply(s, { type: 'chainResolve', seat: P });
+    assert.equal(Z.main[Z.main.length - 1].iid, 'sw2', 'then recycled');
+  }
   { // Baron Nashor: 10 energy + 3 Chaos power from 12 runes (a rune exhausted for energy can then be recycled
     // for power); it adds Baron Pit and enters there; enemy spells can't choose it
     const s = mk(), P = s.active, Z = s.players[P].zones, rune = all.find(c => c.name === 'Chaos Rune');
@@ -587,7 +624,7 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     const bfGame = (bfName, autoMode) => {
       const s = mk(), P = s.active, Z = s.players[P].zones;
       s.cd[by(bfName).id] = by(bfName); s.bfs[0].card.cid = by(bfName).id; s.auto = { p1: autoMode, p2: autoMode };
-      const u = Z.main.find(c => g.cd(s, c).type === 'Unit'); Z.main.splice(Z.main.indexOf(u), 1); u.ex = false; Z.base.push(u);
+      const u = Z.main.find(c => g.cd(s, c).type === 'Unit' && !/conquer|move|attack/i.test(g.cd(s, c).text || '')); Z.main.splice(Z.main.indexOf(u), 1); u.ex = false; Z.base.push(u);
       s.bfs[0].units.p1 = []; s.bfs[0].units.p2 = []; s.bfs[0].ctrl = null;
       return { s, P, Z, u };
     };

@@ -79,7 +79,7 @@ const EN = {
   'Choisissez votre unité': 'Choose your unit', 'Choisissez l’unité adverse (dégâts = force)': 'Choose the enemy unit (damage = Might)', 'Choisissez l’unité à bannir et rejouer': 'Choose the unit to banish and replay',
   'Choisissez l’unité à déplacer': 'Choose the unit to move', 'Placez une unité sous le deck': 'Put a unit at the bottom of the deck', 'Détruisez une de vos unités': 'Kill one of your units',
   'Buffez une unité': 'Buff a unit', 'Choisissez une cible': 'Choose a target', 'Choisissez le champ de bataille': 'Choose the battlefield', 'Choisissez un champ de bataille': 'Choose a battlefield',
-  'Prédiction': 'Predict', 'Cliquez sur les cartes de votre main à défausser.': 'Click the cards in your hand to discard.', 'Cliquez sur l’unité à détruire.': 'Click the unit to kill.',
+  'Prédiction': 'Predict', 'Choisissez une carte': 'Choose a card', 'Cliquez sur les cartes de votre main à défausser.': 'Click the cards in your hand to discard.', 'Cliquez sur l’unité à détruire.': 'Click the unit to kill.',
   'Cliquez sur l’unité alliée qui reçoit le buff (+1 force si elle n’en a pas déjà un).': 'Click the friendly unit that gets the buff (+1 Might if it has none yet).',
   'Cliquez sur la cible. Les unités ennemies sont marquées en rouge.': 'Click the target. Enemy units are marked in red.', 'Cliquez sur le champ de bataille visé.': 'Click the battlefield.',
   'Le dessus de votre deck. Cliquez sur les cartes à recycler sous le deck, les autres restent dessus.': 'The top of your deck. Click the cards to recycle to the bottom; the others stay on top.',

@@ -992,6 +992,7 @@ function renderPrompt(P, v) {
     : q.kind === 'target' ? q.opts.map(id => locate(id)).filter(Boolean).map(L => L.c)
     : q.kind === 'bf' ? q.opts.map(i => v.bfs[i].card).filter(Boolean)
     : q.kind === 'predict' ? q.cards.map(id => v.players[me].zones.main.find(c => c.iid === id)).filter(Boolean)
+    : q.kind === 'pick' ? q.cards.map(id => [...v.players[me].zones.trash, ...v.players[me].zones.main].find(c => c.iid === id)).filter(Boolean)
     : myUnits.filter(c => c.iid !== q.exclude);
   const multi = q.kind === 'predict', max = multi ? pool.length : q.n;
   const mark = q.kind === 'discard' || q.kind === 'sacrifice' ? 'toss' : 'chosen';
@@ -1003,8 +1004,8 @@ function renderPrompt(P, v) {
   const OP = { dmg: `Infligez ${fx.n} dégât${fx.n > 1 ? 's' : ''}`, kill: fx.gear ? 'Détruisez un équipement' : 'Détruisez une unité', stun: 'Étourdissez une unité', might: `${fx.n > 0 ? '+' : ''}${fx.n} force ce tour`, ready: 'Redressez une unité', hand: 'Renvoyez une unité en main', recall: 'Rappelez une unité', attach: 'Attachez l’équipement',
     assault: `Donnez [Assault ${fx.n === 'might' ? '= force' : fx.n}] ce tour`, shield: `Donnez [Shield ${fx.n}]${fx.tank ? ' et [Tank]' : ''} ce tour`, double: 'Doublez la force d’une unité', mark: 'Choisissez votre unité',
     duel: 'Choisissez l’unité adverse (dégâts = force)', blink: 'Choisissez l’unité à bannir et rejouer', moveTo: 'Choisissez l’unité à déplacer', deck: 'Placez une unité sous le deck', dmgSplash: `Infligez ${fx.n} (et ${fx.splash} aux autres ennemis là-bas)` };
-  const title = { discard: `Défaussez ${q.n} carte${q.n > 1 ? 's' : ''}`, sacrifice: 'Détruisez une de vos unités', buff: 'Buffez une unité', target: OP[fx.op] || 'Choisissez une cible', bf: fx.kind === 'target' ? 'Choisissez le champ de bataille' : fx.kind === 'bfBuff' ? 'Choisissez un champ de bataille' : `${fx.n} dégâts aux ennemis d’un champ de bataille`, predict: 'Prédiction' }[q.kind];
-  const help = { discard: 'Cliquez sur les cartes de votre main à défausser.', sacrifice: 'Cliquez sur l’unité à détruire.', buff: 'Cliquez sur l’unité alliée qui reçoit le buff (+1 force si elle n’en a pas déjà un).', target: 'Cliquez sur la cible. Les unités ennemies sont marquées en rouge.', bf: 'Cliquez sur le champ de bataille visé.', predict: 'Le dessus de votre deck. Cliquez sur les cartes à recycler sous le deck, les autres restent dessus.' }[q.kind];
+  const title = { discard: `Défaussez ${q.n} carte${q.n > 1 ? 's' : ''}`, sacrifice: 'Détruisez une de vos unités', buff: 'Buffez une unité', target: OP[fx.op] || 'Choisissez une cible', bf: fx.kind === 'target' ? 'Choisissez le champ de bataille' : fx.kind === 'bfBuff' ? 'Choisissez un champ de bataille' : `${fx.n} dégâts aux ennemis d’un champ de bataille`, predict: 'Prédiction', pick: 'Choisissez une carte' }[q.kind];
+  const help = { discard: 'Cliquez sur les cartes de votre main à défausser.', sacrifice: 'Cliquez sur l’unité à détruire.', buff: 'Cliquez sur l’unité alliée qui reçoit le buff (+1 force si elle n’en a pas déjà un).', target: 'Cliquez sur la cible. Les unités ennemies sont marquées en rouge.', bf: 'Cliquez sur le champ de bataille visé.', pick: `${q.card} : cliquez sur la carte à prendre (ou « Aucune cible » pour ne rien prendre).`, predict: 'Le dessus de votre deck. Cliquez sur les cartes à recycler sous le deck, les autres restent dessus.' }[q.kind];
   const btnLabel = () => (multi ? (S.pick.size ? `Recycler ${S.pick.size} carte${S.pick.size > 1 ? 's' : ''}` : 'Tout garder') : 'Valider');
   P.innerHTML = '';
   P.append(h('div', { class: 'pg' },

@@ -44,6 +44,7 @@ function kwOf(s, c) {
     for (const n of ['assault', 'shield', 'hunt', 'deflect', 'disarm']) k[n] += x[n];
     for (const n of ['tank', 'ganking', 'backline']) k[n] = k[n] || x[n];
   }
+  if (c.tg) k.ganking = true;
   return k;
 }
 function hp(s, c, role) {
@@ -150,6 +151,14 @@ function mayCond(s, p, e) {
     case 'mightyHere': return here.some(c => hp(s, c) >= 5);
     case 'buffed': return unitsOf(s, p).some(c => c.buff > 0);
     case 'unitsHere': return here.length > 0;
+    case 'gear3': return s.players[p].zones.base.filter(g => cd(s, g).type === 'Gear' && g.iid !== e.src).length >= 3;
+    case 'runes7': return runesOf(s, p).length >= 7;
+    case 'otherMight5': return unitsOf(s, p).filter(c => c.iid !== e.src).reduce((t, c) => t + hp(s, c), 0) >= 5;
+    case 'poro': return unitsOf(s, p).some(c => c.iid !== e.src && (cd(s, c).tags || []).includes('Poro'));
+    case 'legion': return !!e.legion;
+    case 'oppNear': return s.players[other(p)].score >= s.winScore - 3;
+    case 'notMyTurn': return s.active !== p;
+    case 'runeDeckEmpty': return !s.players[p].zones.runeDeck.length;
     case 'hasGear': return s.players[p].zones.base.some(g => cd(s, g).type === 'Gear' && /\[Equip\]/.test(cd(s, g).text || ''));
     default: return true;
   }
@@ -228,7 +237,8 @@ function nextShowdown(s) {
 function resolveTop(s) {
   const c = s.chain.pop(), cb = c.cb, d = cd(s, c), p = cb.by;
   delete c.cb;
-  if (cb.flow) s.players[c.owner].zones.banish.unshift(c); else toTrash(s, c);
+  if (cb.flow || /Banish this\./.test(d.text || '')) s.players[c.owner].zones.banish.unshift(c);
+  else if (cb.recycle) s.players[c.owner].zones.main.push(c); else toTrash(s, c);
   log(s, `${d.name} (${seatName(s, p)}) se résout.`);
   let fx = R.playFx(d, { legion: cb.legion, xp: s.players[p].xp || 0 });
   if (cb.apply === false) fx = fx.filter(e => e.who === 'opp');
@@ -257,6 +267,8 @@ function runFx(s) {
 function runFxLoop(s) {
   while (s.fxQueue && s.fxQueue.length && !s.pending) {
     const e = s.fxQueue.shift(), to = e.who === 'self' ? e.by : other(e.by), T = seatName(s, to);
+    if (e.ifHidden && !e.fromHidden) continue; // "when you play me from face down"
+    if (e.cond && e.kind !== 'may' && !mayCond(s, to, e)) continue;
     if (e.kind === 'draw') { const n = draw(s, to, e.n + (e.per === 'bfCtrl' || e.per === 'bfCtrlOther' ? s.bfs.filter((b, i) => b.ctrl === to && !(e.per === 'bfCtrlOther' && i === e.bfAt)).length : e.per === 'mighty' ? unitsOf(s, to).filter(c => hp(s, c) >= 5).length : 0)); log(s, `${T} pioche ${n} (${e.card}).`); }
     else if (e.kind === 'reveal') { for (const c of s.players[to].zones.hand) c.rev = true; log(s, `${T} révèle sa main (${e.card}).`); }
     else if (e.kind === 'token') makeTokens(s, to, e, e.here ? e.bfAt : null, e.card);
@@ -274,6 +286,7 @@ function runFxLoop(s) {
       const hit = (s.fxHit || {})[e.src + '#' + (e.grp || 0)];
       if (hit && e.distinct) opts = opts.filter(id => !hit.ids.includes(id));
       if (hit && e.sameLoc && hit.loc) opts = opts.filter(id => locOf(s, id) === hit.loc);
+      if (hit && e.diffLoc) opts = opts.filter(id => !(hit.locs || []).includes(locOf(s, id)));
       if (!opts.length) { log(s, `${e.card} : aucune cible valide.`); continue; }
       const pre = s.fxPre && s.fxPre[e.src], k = pre ? pre.findIndex(id => opts.includes(id)) : -1;
       const lost = pre && k < 0 ? pre.findIndex(id => String(id).startsWith('gone:')) : -1;
@@ -284,8 +297,8 @@ function runFxLoop(s) {
       if (pick === null) continue; // optional target, none declared
       s.pending = { kind: 'target', to, n: 1, by: e.by, card: e.card, fx: e, opts, opt: !!e.opt };
       log(s, `${T} choisit une cible (${e.card}).`);
-    } else if (e.kind === 'aoe' || e.kind === 'bfBuff') {
-      const opts = s.bfs.map((b, i) => i).filter(i => (e.kind === 'aoe' ? s.bfs[i].units[other(to)].length : e.mine ? s.bfs[i].units[to].length : s.bfs[i].units.p1.length + s.bfs[i].units.p2.length));
+    } else if (e.kind === 'aoe' || e.kind === 'bfBuff' || e.kind === 'bfRecall') {
+      const opts = s.bfs.map((b, i) => i).filter(i => (e.kind === 'aoe' ? s.bfs[i].units[other(to)].length : e.mine || e.kind === 'bfRecall' ? s.bfs[i].units[to].length : s.bfs[i].units.p1.length + s.bfs[i].units.p2.length));
       if (!opts.length) continue;
       const pick = opts.includes(e.preBf) ? e.preBf : opts.length === 1 ? opts[0] : null;
       if (pick != null) { bfEffect(s, e, pick, to); continue; }
@@ -336,6 +349,33 @@ function runFxLoop(s) {
       if (e.pay && !R.planCost(runesOf(s, to), s.players[to].pool || newPool(), e.pay)) { log(s, `${e.card} : ${T} ne peut pas payer (${costText(e.pay)}).`); continue; }
       s.pending = { kind: 'confirm', to, n: 0, by: e.by, card: e.card, text: e.text, fx: e, ai: e.ai !== false };
       log(s, `${T} choisit d’utiliser ou non ${e.card}.`);
+    }
+    else if (e.kind === 'pick') {
+      const z = s.players[to].zones, pool = e.from === 'top' ? z.main.slice(0, e.n) : z.trash, F = e.filter || {};
+      const ok = c => { const d = cd(s, c); return (!F.types || F.types.includes(d.type)) && (F.maxE == null || (d.energy || 0) <= F.maxE) && (F.maxP == null || (d.power || 0) <= F.maxP); };
+      const cards = pool.filter(ok).map(c => c.iid);
+      if (!cards.length) { log(s, `${e.card} : aucune carte possible.`); if (e.from === 'top') for (const c of z.main.splice(0, e.n)) z.main.push(c); continue; }
+      s.pending = { kind: 'pick', to, n: 1, by: e.by, card: e.card, cards, from: e.from, fx: e, opt: true, top: e.from === 'top' ? pool.map(c => c.iid) : null };
+      log(s, `${T} choisit une carte ${e.from === 'top' ? `parmi les ${pool.length} du dessus de son deck` : 'dans sa défausse'} (${e.card}).`);
+    }
+    else if (e.kind === 'extraTurn') { s.extraTurn = to; log(s, `${T} jouera un tour supplémentaire (${e.card}).`); }
+    else if (e.kind === 'noSpellDmg') { s.noSpellDmg = s.turn; log(s, `Les dégâts des sorts et capacités sont prévenus ce tour (${e.card}).`); }
+    else if (e.kind === 'sacGear') {
+      for (const q of SEATS) { const g = s.players[q].zones.base.filter(x => cd(s, x).type === 'Gear').sort((a, b) => (cd(s, a).might || 0) - (cd(s, b).might || 0))[0]; if (g) kill(s, find(s, g.iid)); }
+      syncCtrl(s);
+    }
+    else if (e.kind === 'arise') {
+      const n = s.players[to].zones.base.filter(g => cd(s, g).type === 'Gear' && /\[Equip\]/.test(cd(s, g).text || '')).length;
+      if (!n) continue;
+      makeTokens(s, to, { name: 'Sand Soldier', n }, null, e.card);
+      s.players[to].zones.base.slice(-n).slice(-2).forEach(c => (c.ex = false));
+    }
+    else if (e.kind === 'selfTemp') { const f = e.src && find(s, e.src); if (f) { f.c.tmpT = true; log(s, `${name(s, f.c)} gagne [Temporary] (${e.card}).`); } }
+    else if (e.kind === 'counterUnless') { // counter the spell below unless its controller pays
+      const t = s.chain && s.chain[s.chain.length - 1]; if (!t) continue;
+      const c2 = t.cb.by, cost = { e: e.e, p: [] };
+      if (auto(s, c2) && R.planCost(runesOf(s, c2), s.players[c2].pool || newPool(), cost) && pay(s, c2, cost)) { log(s, `${seatName(s, c2)} paie ${e.e} énergie : ${name(s, t)} n’est pas contré (${e.card}).`); continue; }
+      s.chain.pop(); delete t.cb; toTrash(s, t); log(s, `${name(s, t)} est contré (${e.card}).`);
     }
     else if (e.kind === 'recycleSelf') {
       if (e.ifHidden && !e.fromHidden) continue;
@@ -429,6 +469,8 @@ function candidates(s, p, e) {
     if (e.notSelf && c.iid === e.src) return;
     if (e.self && c.iid !== e.src) return;
     if (e.notHere && where === 'bf' && bf === e.bfAt) return;
+    if (e.atBf && (e.bfAt == null || where !== 'bf' || bf !== e.bfAt)) return;
+    if (e.crowd && (where !== 'bf' || s.bfs[bf].units.p1.length + s.bfs[bf].units.p2.length < e.crowd)) return;
     if (e.tag && !(d.tags || []).includes(e.tag)) return;
     if (e.where === 'bf' && where !== 'bf') return;
     if (e.where === 'base' && where !== 'base') return;
@@ -458,11 +500,12 @@ const locOf = (s, iid) => { const f = find(s, iid); return f ? (f.zone === 'bf' 
 function applyTarget(s, e, iid, p) {
   if (e.src) { // remember the units this card chose (different units / same location)
     const k = e.src + '#' + (e.grp || 0), h = (s.fxHit || (s.fxHit = {}))[k] || (s.fxHit[k] = { ids: [], loc: locOf(s, iid) });
-    h.ids.push(iid);
+    h.ids.push(iid); (h.locs || (h.locs = [])).push(locOf(s, iid));
   }
   payDeflect(s, p, iid);
   const f = find(s, iid); if (!f) return;
   const c = f.c, N = name(s, c), src = e.card ? ` (${e.card})` : '';
+  if ((e.op === 'dmg' || e.op === 'dmgSplash') && s.noSpellDmg === s.turn) { log(s, `Dégâts prévenus (${e.card}).`); return; }
   if (e.op === 'dmg') { c.dmg = (c.dmg || 0) + e.n; log(s, `${N} subit ${e.n} dégât${e.n > 1 ? 's' : ''}${src}.`); }
   else if (e.op === 'kill') { kill(s, f); syncCtrl(s); return; }
   else if (e.op === 'stun') { c.st = true; log(s, `${N} est étourdi${src}.`); }
@@ -476,6 +519,21 @@ function applyTarget(s, e, iid, p) {
   else if (e.op === 'duelSelf') { const o = e.src && find(s, e.src); if (o && ['base', 'bf'].includes(o.zone)) duel(s, o, f); return; }
   else if (e.op === 'stunOrKill') { if (c.st) { kill(s, f); syncCtrl(s); return; } c.st = true; log(s, `${N} est étourdi${src}.`); }
   else if (e.op === 'duel') { const o = s.fxMark && find(s, s.fxMark); s.fxMark = null; if (o) duel(s, o, f); return; }
+  else if (e.op === 'swap') { // Switcheroo: the two units' Mights are swapped this turn
+    const o = s.fxMark && find(s, s.fxMark); s.fxMark = null; if (!o || o.c === c) return;
+    const a = hp(s, o.c), b = hp(s, c);
+    o.c.tb = (o.c.tb || 0) + b - a; c.tb = (c.tb || 0) + a - b;
+    log(s, `${name(s, o.c)} et ${N} échangent leur force ce tour (${b} et ${a})${src}.`); return;
+  }
+  else if (e.op === 'swapPlaces') { // Tideturner: I go where that unit is, it goes where I was
+    const me = e.src && find(s, e.src); if (!me || !['base', 'bf'].includes(me.zone) || !['base', 'bf'].includes(f.zone)) return;
+    const la = me.zone === 'bf' ? me.bf : 'base', lb = f.zone === 'bf' ? f.bf : 'base';
+    if (la === lb) return;
+    placeUnit(s, me.c.iid, lb, { op: 'moveTo', card: e.card }); placeUnit(s, c.iid, la, { op: 'moveTo', card: e.card }); return;
+  }
+  else if (e.op === 'kwTurn') { c.tg = true; log(s, `${N} gagne [Ganking] ce tour${src}.`); }
+  else if (e.op === 'setMight') { const n = e.n - hp(s, c); c.tb = (c.tb || 0) + n; log(s, `La force de ${N} devient ${e.n} ce tour${src}.`); }
+  else if (e.op === 'tempo') { c.tmpT = true; log(s, `${N} gagne [Temporary]${src}.`); }
   else if (e.op === 'dmgSplash') {
     c.dmg = (c.dmg || 0) + e.n; log(s, `${N} subit ${e.n} dégâts${src}.`);
     const others = f.zone === 'bf' ? s.bfs[f.bf].units[f.p].filter(x => x !== c && cd(s, x).type === 'Unit') : [];
@@ -531,6 +589,10 @@ function placeUnit(s, iid, loc, e) {
 function bfEffect(s, e, b, p) {
   if (e.kind === 'aoe') return aoe(s, e, b, p);
   if (e.kind === 'target') return placeUnit(s, e.unit, b, e);
+  if (e.kind === 'bfRecall') { // Emperor's Divide: my units at a battlefield go back to base
+    const us = s.bfs[b].units[p].splice(0); s.players[p].zones.base.push(...us);
+    log(s, `${us.length} unité${us.length > 1 ? 's' : ''} de ${seatName(s, p)} retourne${us.length > 1 ? 'nt' : ''} à la base (${e.card}).`); syncCtrl(s); return;
+  }
   if (e.kind === 'bfBuff') {
     const bf = s.bfs[b];
     for (const c of bf.units[p]) { if (e.friendly) c.tb = (c.tb || 0) + e.friendly; if (e.shield) c.ts = (c.ts || 0) + e.shield; }
@@ -743,7 +805,7 @@ function startTurn(s, p) {
   }
   readyAll(s, p);
   for (const c of [...s.players[p].zones.base, ...s.bfs.flatMap(b => b.units[p])]) {
-    if (R.kw(cd(s, c).text).temporary) { if (!auto(s, p)) { log(s, `↳ ${name(s, c)} est Temporary : à détruire à la main.`); continue; } const f = find(s, c.iid); if (f) kill(s, f); }
+    if (R.kw(cd(s, c).text).temporary || c.tmpT) { if (!auto(s, p)) { log(s, `↳ ${name(s, c)} est Temporary : à détruire à la main.`); continue; } const f = find(s, c.iid); if (f) kill(s, f); }
   }
   syncCtrl(s);
   let held = 0;
@@ -1020,13 +1082,13 @@ function act(s, a, who) {
       if (d.type === 'Unit') for (const u of mineOnBoard(s, p)) if (u !== c) trigger(s, u, 'playUnit', p, null);
       // play effects: everything for the AI (a.targets / a.bf pre-select its choices); for a human, only
       // what the opponent must decide or reveal (discard, kill one of their units, reveal their hand)
-      const bfAt = toBf != null && d.type === 'Unit' ? toBf : null;
+      const bfAt = toBf != null && (d.type === 'Unit' || fromHidden) ? toBf : null;
       let fx = R.playFx(d, { legion, xp: pl.xp || 0 });
       if (d.type === 'Unit' && R.kw(d.text).weaponmaster) fx = [...fx, { who: 'self', kind: 'may', text: 'Équiper un de vos équipements à cette unité (Weaponmaster) ?', cond: 'hasGear', fx: [{ who: 'self', kind: 'equipBest' }] }];
       if (k.quickDraw && d.type === 'Gear') fx = [{ kind: 'target', op: 'attach', side: 'friendly', where: 'any', who: 'self' }, ...fx];
       (s.fxPre || (s.fxPre = {}))[c.iid] = (a.targets || []).slice();
       if ((a.targets || []).length) (s.fxDeclared || (s.fxDeclared = {}))[c.iid] = true;
-      s.fxQueue = [...(s.fxQueue || []), ...fx.map(e => ({ ...e, by: p, card: d.name, src: c.iid, bfAt, preBf: a.bf, fromHidden }))];
+      s.fxQueue = [...(s.fxQueue || []), ...fx.map(e => ({ ...e, by: p, card: d.name, src: c.iid, bfAt, preBf: a.bf, fromHidden, legion }))];
       runFx(s);
       return null;
     }
@@ -1142,12 +1204,33 @@ function act(s, a, who) {
       if (!q) return 'Rien à résoudre';
       if (who !== q.to) return `C’est à ${seatName(s, q.to)} de choisir`;
       const ids = [...new Set(a.iids || [])];
+      if (q.kind === 'pick') {
+        if (ids.length > 1 || ids.some(id => !q.cards.includes(id))) return 'Choisissez une des cartes proposées';
+        const e = q.fx, z = s.players[q.to].zones, W2 = seatName(s, q.to);
+        s.pending = null;
+        const i = ids[0] ? (e.from === 'top' ? z.main : z.trash).findIndex(c => c.iid === ids[0]) : -1;
+        const c = i >= 0 ? (e.from === 'top' ? z.main : z.trash).splice(i, 1)[0] : null;
+        if (e.from === 'top') { const rest = z.main.filter(x => q.top.includes(x.iid)); z.main = z.main.filter(x => !q.top.includes(x.iid)).concat(rest); }
+        if (!c) log(s, `${W2} ne prend aucune carte (${q.card}).`);
+        else if (e.then === 'hand') { z.hand.push(c); log(s, `${W2} prend ${name(s, c)} en main (${q.card}).`); }
+        else if (cd(s, c).type === 'Spell') { // cast for free: on the stack like any spell
+          c.cb = { by: q.to, seen: false, flow: false, recycle: !!e.recycle, repeat: false, legion: false, targets: [], fx: true };
+          (s.chain || (s.chain = [])).push(c);
+          log(s, `✦ ${W2} lance ${name(s, c)} depuis sa défausse sans payer son énergie (${q.card}).`);
+        } else {
+          c.ex = cd(s, c).type === 'Unit' && !R.entersReady(cd(s, c)); z.base.push(c);
+          log(s, `✦ ${W2} joue ${name(s, c)} depuis sa défausse sans payer son coût (${q.card}).`);
+        }
+        runFx(s);
+        return null;
+      }
       if (q.kind === 'confirm') {
         const e = q.fx;
         if (a.yes && e.pay && !pay(s, q.to, e.pay)) return `Pas assez de runes (${costText(e.pay)}).`;
         s.pending = null;
         log(s, `${seatName(s, q.to)} ${a.yes ? 'utilise' : 'n’utilise pas'} ${q.card}.`);
-        if (a.yes) s.fxQueue = [...e.fx.map(x => ({ ...x, by: e.by, card: e.card, src: e.src, bfAt: e.bfAt })), ...(s.fxQueue || [])];
+        const then = a.yes ? e.fx : e.elseFx || [];
+        if (then.length) s.fxQueue = [...then.map(x => ({ ...x, by: e.by, card: e.card, src: e.src, bfAt: e.bfAt })), ...(s.fxQueue || [])];
         runFx(s);
         return null;
       }
@@ -1324,12 +1407,12 @@ function act(s, a, who) {
       if (s.chain && s.chain.length) return 'Résolvez d’abord la pile.';
       while (s.showdown) closeShowdown(s);
       if (auto(s, s.active)) s.bfs.forEach((b, i) => { if (b.units.p1.some(c => cd(s, c).type === 'Unit') && b.units.p2.some(c => cd(s, c).type === 'Unit')) act(s, { type: 'fight', bf: i, att: s.active }, s.active); });
-      for (const c of [...s.bfs.flatMap(b => [...b.units.p1, ...b.units.p2]), ...s.players.p1.zones.base, ...s.players.p2.zones.base]) { c.dmg = 0; c.tb = 0; c.ta = 0; c.ts = 0; c.tt = false; c.st = false; }
+      for (const c of [...s.bfs.flatMap(b => [...b.units.p1, ...b.units.p2]), ...s.players.p1.zones.base, ...s.players.p2.zones.base]) { c.dmg = 0; c.tb = 0; c.ta = 0; c.ts = 0; c.tt = false; c.st = false; c.tg = false; }
       for (const p of SEATS) for (const c of s.players[p].zones.hand) c.rev = false;
       const er = s.endReady && s.endReady[s.active];
       if (er) { let k = 0; for (const r of s.players[s.active].zones.runes) if (r.ex && k < er) { r.ex = false; k++; } delete s.endReady[s.active]; log(s, `${seatName(s, s.active)} redresse ${k} rune${k > 1 ? 's' : ''} (Targon's Peak).`); }
       for (const p of SEATS) s.players[p].pool = newPool(); // unspent energy/power is lost
-      s.active = other(s.active);
+      if (s.extraTurn === s.active) { delete s.extraTurn; log(s, `${W} prend un tour supplémentaire.`); } else s.active = other(s.active);
       s.turn++;
       log(s, `Fin du tour de ${W}. Tour ${s.turn} : ${seatName(s, s.active)}.`);
       startTurn(s, s.active); // the next turn starts on its own
@@ -1362,7 +1445,7 @@ function viewFor(s, seat) {
   for (const b of v.bfs) for (const p of SEATS) if (!sees(p)) b.units[p] = b.units[p].map(c => (c.fd ? hide(c) : c));
   for (const b of v.bfs) b.hidden = (b.hidden || []).map(c => (sees(c.owner) ? c : hide(c)));
   // the cards a player predicts are only shown to that player
-  if (v.pending && v.pending.kind === 'predict' && !sees(v.pending.to)) v.pending = { ...v.pending, cards: [] };
+  if (v.pending && (v.pending.kind === 'predict' || (v.pending.kind === 'pick' && v.pending.top)) && !sees(v.pending.to)) v.pending = { ...v.pending, cards: [], top: [] };
   v.log = v.log.slice(-80);
   delete v.cd; delete v.fxQueue;
   // the opponent's battlefield pick stays secret until both have chosen
