@@ -457,6 +457,46 @@ assert.equal(s.bfs[1].ctrl, 'p2', 'undo restores the combat');
   assert.equal(g.apply(t, { type: 'undo', seat: me, mine: true }), null);
   assert.equal(t.players[me].zones.hand.length, hand, 'then my draw is undone');
 }
+{ // BO3: a battlefield picked in an earlier game of the match is no longer offered
+  const t = g.newState(); t.seats = { p1: { name: 'A' }, p2: { name: 'B' } };
+  assert.equal(g.apply(t, { type: 'start', cards, decks: { p1: deck('B1'), p2: deck('B2') }, usedBf: { p1: ['B1'], p2: [] } }), null);
+  assert.deepEqual(t.bfOpts.p1, ['B2']); assert.deepEqual(t.bfOpts.p2.sort(), ['B1', 'B2']);
+}
+{ // AI attack model: at 7, conquering one battlefield of two draws a card, it doesn't win
+  const t = newGame(deck('B1'), deck('B2'), cards);
+  pregame(t, { p1: () => [], p2: () => [] });
+  const P = t.active, M = AI._test.model;
+  t.players[P].score = 7; t.scored[P] = [];
+  const m = M(t, P); m.base[P] = [{ iid: 'z', side: P, m: 3, as: 0, sh: 0, ready: true, dmg: 0 }];
+  AI._test.applyMoves(m, P, [{ iid: 'z', to: 0 }]);
+  assert.equal(m.score[P], 7, 'final point refused in the model'); assert.equal(m.drew[P], 1);
+}
+{ // real cards: Nidalee draws when she wins a combat; Fizz casts a spell from the trash and pays its Power
+  const real = fs.existsSync('./data/cards.json') ? require('./data/cards.json') : null;
+  const find = n => real && real.find(c => c.name === n && !c.alt);
+  const nid = find('Nidalee, Cat Form'), fz = find('Fizz, Trickster');
+  const sp = real && real.find(c => c.type === 'Spell' && !c.alt && (c.energy || 0) <= 3 && (c.power || 0) === 1 && /^Draw \d/.test(c.text || ''));
+  if (nid && fz && sp) {
+    const t = newGame(deck('B1'), deck('B2'), [...cards, nid, fz, sp]);
+    pregame(t, { p1: () => [], p2: () => [] });
+    for (const x of [nid, fz, sp]) t.cd[x.id] = x;
+    const P = t.active, O = other(P), Z = t.players[P].zones, mkc = (id, cid, who = P) => ({ iid: id, cid, owner: who, ex: false, dmg: 0, buff: 0 });
+    Z.base.push(mkc('nd', nid.id)); t.bfs[0].units[O].push(mkc('e1', 'U', O));
+    const h0 = Z.hand.length;
+    assert.equal(g.apply(t, { type: 'move', seat: P, iid: 'nd', to: { bf: 0, side: P } }), null);
+    while (t.showdown) assert.equal(g.apply(t, { type: 'pass', seat: t.showdown.focus }), null);
+    assert.ok(t.log.some(l => /Nidalee, Cat Form \(combat gagné\)/.test(l.msg)), 'Nidalee triggers'); assert.ok(Z.hand.length >= h0 + 1, 'Nidalee draws');
+    const runeOf = dom => real.find(c => c.type === 'Rune' && !c.alt && (c.domain || []).includes(dom));
+    [...fz.domain, ...sp.domain, ...fz.domain, ...sp.domain, ...fz.domain, ...sp.domain].forEach((dom, i) => { const r = runeOf(dom); t.cd[r.id] = r; Z.runes.push(mkc('fr' + i, r.id)); });
+    Z.hand.push(mkc('fz', fz.id)); Z.trash.push(mkc('sp', sp.id));
+    assert.equal(g.apply(t, { type: 'play', seat: P, iid: 'fz' }), null);
+    while (t.chain && t.chain.length && !t.pending) { const top = t.chain[t.chain.length - 1]; g.apply(t, top.cb.seen ? { type: 'chainResolve', seat: P } : { type: 'chainPass', seat: O }); }
+    assert.equal(t.pending && t.pending.kind, 'pick', 'Fizz offers the trash spell');
+    const a = AI.next(t, P, 'hard', {}); assert.deepEqual(a.iids, ['sp'], 'AI takes the spell');
+    const n0 = Z.runes.length; assert.equal(g.apply(t, { ...a, seat: P }), null);
+    assert.equal(Z.runes.length, n0 - 1, 'its Power is paid (a rune recycled)'); assert.ok(t.chain.some(c => c.iid === 'sp'), 'the spell is cast');
+  }
+}
 console.log('reducer OK');
 
 /* ---- AI vs AI on real data ---- */

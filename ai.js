@@ -22,13 +22,23 @@ function unitOf(s, c, side) {
 }
 const isUnit = (s, c) => G.cd(s, c).type === 'Unit';
 function model(s, me) {
-  const op = other(me), m = { me, op, win: s.winScore, score: {}, base: {}, bfs: [] };
+  const op = other(me), m = { me, op, win: s.winScore, score: {}, base: {}, bfs: [], sc: {}, drew: { [me]: 0, [op]: 0 } };
   for (const p of [me, op]) {
     m.score[p] = s.players[p].score;
+    m.sc[p] = s.active === p ? ((s.scored || {})[p] || []).slice() : []; // battlefields already scored this turn
     m.base[p] = s.players[p].zones.base.filter(c => isUnit(s, c)).map(c => unitOf(s, c, p));
   }
   m.bfs = s.bfs.map(b => ({ ctrl: b.ctrl, u: { [me]: b.units[me].map(c => unitOf(s, c, me)), [op]: b.units[op].map(c => unitOf(s, c, op)) } }));
   return m;
+}
+// a conquest scores once per battlefield per turn; the final point needs every battlefield scored this turn,
+// otherwise a card is drawn instead (rule 471)
+function score(m, side, i) {
+  const sc = m.sc[side] || (m.sc[side] = []);
+  if (sc.includes(i)) return;
+  sc.push(i);
+  if (m.score[side] >= m.win - 1 && !m.bfs.every((_, k) => sc.includes(k))) m.drew[side] = (m.drew[side] || 0) + 1;
+  else m.score[side]++;
 }
 const hpA = u => Math.max(0, u.m + u.as), hpD = u => Math.max(0, u.m + u.sh);
 const allUnits = (m, p) => [...m.base[p], ...m.bfs.flatMap(b => b.u[p])];
@@ -39,7 +49,7 @@ function simFight(m, i, att) {
   const { deadA, deadD } = R.combat(b.u[att], b.u[def], hpA, hpD);
   b.u[att] = b.u[att].filter(u => !deadA.includes(u));
   b.u[def] = b.u[def].filter(u => !deadD.includes(u));
-  if (b.u[att].length && !b.u[def].length) { b.ctrl = att; m.score[att]++; }
+  if (b.u[att].length && !b.u[def].length) { b.ctrl = att; score(m, att, i); }
   else if (b.u[att].length) { m.base[att].push(...b.u[att].splice(0)); b.ctrl = def; }
   else b.ctrl = b.u[def].length ? def : null;
 }
@@ -57,7 +67,7 @@ function applyMoves(m, side, moves) {
   for (const i of hit) {
     const b = m.bfs[i];
     if (b.u[other(side)].length) simFight(m, i, side);
-    else if (b.ctrl !== side) { b.ctrl = side; m.score[side]++; }
+    else if (b.ctrl !== side) { b.ctrl = side; score(m, side, i); }
   }
 }
 
@@ -71,7 +81,7 @@ function greedyAttack(m, side) {
     for (let k = 1; k <= avail.length; k++) {
       const grp = avail.slice(0, k), t = clone(m);
       applyMoves(t, side, grp.map(u => ({ iid: u.iid, to: i })));
-      if (t.bfs[i].ctrl === side && t.score[side] > m.score[side]) {
+      if (t.bfs[i].ctrl === side && (t.score[side] > m.score[side] || t.drew[side] > m.drew[side])) {
         moves.push(...grp.map(u => ({ iid: u.iid, to: i })));
         avail = avail.slice(k);
         break;
@@ -91,7 +101,8 @@ function evaluate(m, me) {
   if (m.score[me] >= m.win) return 1e6 + m.score[me];
   const t = clone(m);
   for (const p of [me, op]) for (const u of allUnits(t, p)) { u.dmg = 0; u.stun = false; if (p === op) u.ready = true; }
-  for (const b of t.bfs) if (b.ctrl === op) t.score[op]++;
+  t.sc[op] = []; // the opponent's turn: holds score first (no final-point limit), then conquests
+  t.bfs.forEach((b, i) => { if (b.ctrl === op) { t.score[op]++; t.sc[op].push(i); } });
   if (t.score[op] >= t.win) return -1e6;
   if (m.pro) { // the reply that hurts me most: greedy, all-in on one battlefield, or nothing
     const replies = [greedyAttack(t, op), ...t.bfs.map((b, i) => t.base[op].filter(u => u.ready && u.m > 0).map(u => ({ iid: u.iid, to: i })))];
@@ -103,7 +114,7 @@ function evaluate(m, me) {
   let ctrl = 0;
   for (const b of t.bfs) { if (b.ctrl === me) { t.score[me]++; ctrl++; } else if (b.ctrl === op) ctrl--; }
   return 10 * (t.score[me] - t.score[op]) + (t.score[me] >= t.win ? 400 : 0) + 0.6 * (mightOf(t, me) - mightOf(t, op))
-    + 0.3 * (allUnits(t, me).length - allUnits(t, op).length) + 1.5 * ctrl;
+    + 0.3 * (allUnits(t, me).length - allUnits(t, op).length) + 1.5 * ctrl + 0.8 * ((m.drew[me] || 0) - (t.drew[op] || 0));
 }
 
 // Hard: try every assignment of up to 7 ready base units to {stay, battlefield 1..n}.
@@ -505,10 +516,14 @@ function pregame(s, me, level) {
 function answer(s, me, level) {
   const q = s.pending;
   if (q.kind === 'confirm') return { type: 'resolve', yes: q.ai !== false }; // battlefield "you may": take it
-  if (q.kind === 'pick') { // the most expensive card offered
+  if (q.kind === 'pick') {
     const z = s.players[me].zones, cs = q.cards.map(id => [...z.trash, ...z.main].find(c => c.iid === id)).filter(Boolean);
-    const best = cs.sort((a, b) => ((G.cd(s, b).energy || 0) + (G.cd(s, b).power || 0)) - ((G.cd(s, a).energy || 0) + (G.cd(s, a).power || 0)))[0];
-    return { type: 'resolve', iids: best ? [best.iid] : [] };
+    const cost = c => (G.cd(s, c).energy || 0) + (G.cd(s, c).power || 0);
+    // a spell cast from the trash (Fizz, Kai'Sa...): the one whose effects are worth the most right now, never one
+    // that would only hurt my own units (a forced target on my unit, a bounce of my unit...)
+    const val = c => { const d = G.cd(s, c); return d.type === 'Spell' && level !== 'easy' ? fxPlan(s, me, d, c.iid).v + 0.05 * cost(c) : cost(c); };
+    const best = cs.map(c => ({ c, v: val(c) })).sort((a, b) => b.v - a.v)[0];
+    return { type: 'resolve', iids: best && (best.v > 0 || G.cd(s, best.c).type !== 'Spell') ? [best.c.iid] : [] };
   }
   if (q.kind === 'discard') {
     const runes = s.players[me].zones.runes.length;

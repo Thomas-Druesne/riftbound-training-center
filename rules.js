@@ -134,7 +134,7 @@ Object.assign(CARD_FX, {
   'Switcheroo': [T('mark', { where: 'bf' }), T('swap', { where: 'bf', sameLoc: true, distinct: true })],
   'Tideturner': [T('swapPlaces', { side: 'friendly', notSelf: true, opt: true })],
   'Decree of Focus': [T('might', { n: 4, side: 'friendly' })],
-  'Fizz, Trickster': [{ who: 'self', kind: 'pick', from: 'trash', filter: { types: ['Spell'], maxE: 3 }, then: 'playFree', recycle: true }],
+  'Fizz, Trickster': [{ who: 'self', kind: 'pick', from: 'trash', filter: { types: ['Spell'], maxE: 3 }, then: 'playFree', recycle: true, payPower: true }],
   'Bedeviling Stranger': [T('hand', { side: 'enemy', where: 'bf', crowd: 4, opt: true })],
   'Gem Jammer': [T('kwTurn', { kw: 'ganking' })],
   'Patched Porobot': [{ who: 'self', kind: 'draw', n: 1, cond: 'gear3' }],
@@ -315,7 +315,7 @@ function playFx(card, ctx = {}) {
 const TRIGGER = {
   attack: /When I attack(?: or defend)?,\s*/i, defend: /When I (?:attack or )?defend,\s*/i, conquer: /When I conquer,\s*/i,
   hold: /When I hold,\s*/i, move: /When I move(?: to a battlefield)?,\s*/i,
-  playSpell: /When you play a spell,\s*/i, playUnit: /When you play a unit,\s*/i, allyDies: /When (?:another|a) friendly unit dies,\s*/i, deathknell: /\[Deathknell\]\s*(?:—|\[(?:>|&gt;)\])?\s*/i,
+  winCombat: /When I win a combat,\s*/i, playSpell: /When you play a spell,\s*/i, playUnit: /When you play a unit,\s*/i, allyDies: /When (?:another|a) friendly unit dies,\s*/i, deathknell: /\[Deathknell\]\s*(?:—|\[(?:>|&gt;)\])?\s*/i,
 };
 const TRIG_FX = {
   'Lucian, Merciless': { conquer: [T('ready', { self: true })] },

@@ -115,7 +115,7 @@ function newTag() {
 }
 function makeRoom(mode, bo) {
   const r = { tag: newTag(), mode, state: game.newState(), clients: new Set(), ai: null, decks: {}, timer: null, seen: Date.now(),
-    match: { bo: bo === 3 ? 3 : 1, wins: { p1: 0, p2: 0 }, game: 1, counted: null, ready: {}, base: {} } };
+    match: { bo: bo === 3 ? 3 : 1, wins: { p1: 0, p2: 0 }, game: 1, counted: null, ready: {}, base: {}, usedBf: { p1: [], p2: [] } } };
   rooms.set(r.tag, r);
   return r;
 }
@@ -152,9 +152,13 @@ function validSide(base, main, side) {
 // next game of the match (or a rematch once the match is over): same seats, decks possibly sideboarded
 async function nextGame(r) {
   clearTimeout(r.timer); r.timer = null;
-  const seats = r.state.seats, m = r.match;
+  const seats = r.state.seats, m = r.match, prev = r.state;
+  // a battlefield is chosen once per match: the ones picked in earlier games are no longer offered
+  for (const p of ['p1', 'p2']) { const id = prev.bfPick && prev.bfPick[p]; if (id && id !== 'none') m.usedBf[p].push(id); }
+  // a human's auto / manual switch carries over to the next game
+  if (r.humanAuto) for (const p of Object.keys(r.humanAuto)) r.humanAuto[p] = !!(prev.auto || {})[p];
   r.state = game.newState(); r.state.seats = seats;
-  if (m.wins.p1 * 2 > m.bo || m.wins.p2 * 2 > m.bo) m.wins = { p1: 0, p2: 0 };
+  if (m.wins.p1 * 2 > m.bo || m.wins.p2 * 2 > m.bo) { m.wins = { p1: 0, p2: 0 }; m.usedBf = { p1: [], p2: [] }; }
   m.game++; m.counted = null; m.ready = {};
   if (r.ai) r.ai.mem = {};
   await startRoom(r);
@@ -163,7 +167,7 @@ async function startRoom(r) {
   await loadCards(false);
   // the AI always plays in auto mode; a human starts in auto mode unless their client asked otherwise
   r.state.auto = { ...(r.humanAuto || {}), ...(r.ai ? { [r.ai.seat]: true } : {}) };
-  const err = game.apply(r.state, { type: 'start', decks: r.decks, cards, caller: r.ai ? other(r.ai.seat) : null });
+  const err = game.apply(r.state, { type: 'start', decks: r.decks, cards, caller: r.ai ? other(r.ai.seat) : null, usedBf: r.match.usedBf });
   if (err) throw new Error(err);
   broadcast(r);
   aiTick(r);

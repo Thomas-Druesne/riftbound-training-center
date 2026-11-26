@@ -204,7 +204,7 @@ function mayCond(s, p, e) {
     default: return true;
   }
 }
-const EV = { attack: 'attaque', defend: 'défend', conquer: 'conquête', hold: 'tient', move: 'déplacement', deathknell: 'à sa mort (Deathknell)', playSpell: 'sort joué', playUnit: 'unité jouée', allyDies: 'unité alliée détruite' };
+const EV = { attack: 'attaque', defend: 'défend', conquer: 'conquête', hold: 'tient', move: 'déplacement', deathknell: 'à sa mort (Deathknell)', winCombat: 'combat gagné', playSpell: 'sort joué', playUnit: 'unité jouée', allyDies: 'unité alliée détruite' };
 function trigger(s, c, ev, p, bf) {
   if (cd(s, c).type === 'Unit') for (const g of gearOn(s, c)) trigger(s, g, ev, p, bf); // gear only: no loop
   const d = cd(s, c), fx = R.triggerFx(d, ev);
@@ -394,7 +394,8 @@ function runFxLoop(s) {
     }
     else if (e.kind === 'pick') {
       const z = s.players[to].zones, pool = e.from === 'top' ? z.main.slice(0, e.n) : z.trash, F = e.filter || {};
-      const afford = c => e.then !== 'playPaid' || !auto(s, to) || !!R.planCost(runesOf(s, to), s.players[to].pool || newPool(), R.cardCost(cd(s, c)));
+      const powerOf = c => ({ e: 0, p: R.cardCost(cd(s, c)).p }); // "you must still pay its Power cost"
+      const afford = c => !auto(s, to) || (e.then === 'playPaid' ? !!R.planCost(runesOf(s, to), s.players[to].pool || newPool(), R.cardCost(cd(s, c))) : !e.payPower || !!R.planCost(runesOf(s, to), s.players[to].pool || newPool(), powerOf(c)));
       const ok = c => { const d = cd(s, c); return afford(c) && ['Unit', 'Gear', 'Spell'].includes(d.type) && (!F.hidden || R.kw(d.text).hidden) && (!F.types || F.types.includes(d.type)) && (F.maxE == null || (d.energy || 0) <= F.maxE) && (F.maxP == null || (d.power || 0) <= F.maxP); };
       const cards = pool.filter(ok).map(c => c.iid);
       if (!cards.length) { log(s, `${e.card} : aucune carte possible.`); if (e.from === 'top') for (const c of z.main.splice(0, e.n)) z.main.push(c); continue; }
@@ -867,7 +868,10 @@ function setup(s, a) {
     shuffle(pl.zones.runeDeck);
     // battlefield: one random among the deck's battlefields
     // each player will pick one of their deck's battlefields
-    s.bfOpts[p] = [...new Set((d.cards.battlefields || []).filter(x => byId[x.id]).map(x => x.id))];
+    const opts = [...new Set((d.cards.battlefields || []).filter(x => byId[x.id]).map(x => x.id))];
+    // BO3: one battlefield per match, those picked in earlier games are out (all of them out: no limit)
+    const used = ((a.usedBf || {})[p]) || [], left = opts.filter(id => !used.includes(id));
+    s.bfOpts[p] = left.length ? left : opts;
     for (const id of s.bfOpts[p]) s.cd[id] = keep(byId[id]);
   }
   // pre-game: battlefield pick -> parity call + die roll -> simultaneous mulligan
@@ -1339,6 +1343,7 @@ function act(s, a, who) {
         if (!c) log(s, `${W2} ne prend aucune carte (${q.card}).`);
         else if (e.then === 'hand') { z.hand.push(c); log(s, `${W2} prend ${name(s, c)} en main (${q.card}).`); }
         else if (e.then === 'playPaid' && auto(s, q.to) && !pay(s, q.to, R.cardCost(cd(s, c)))) { z.main.push(c); log(s, `${W2} ne peut pas payer ${name(s, c)} : recyclé (${q.card}).`); }
+        else if (e.payPower && auto(s, q.to) && !pay(s, q.to, { e: 0, p: R.cardCost(cd(s, c)).p })) { z.trash.push(c); log(s, `${W2} ne peut pas payer la puissance de ${name(s, c)} (${q.card}).`); }
         else if (cd(s, c).type === 'Spell') { // cast for free: on the stack like any spell
           c.cb = { by: q.to, seen: false, flow: false, recycle: !!e.recycle, repeat: false, legion: false, targets: [], fx: true };
           (s.chain || (s.chain = [])).push(c);
@@ -1434,8 +1439,9 @@ function act(s, a, who) {
       for (const u of [...deadA, ...deadD]) { const g = find(s, u.c.iid); if (g) kill(s, g); }
       if (s.decree === s.turn) for (const u of [...WA, ...WD]) if (u.dmg > 0) { const g = find(s, u.c.iid); if (g && ['bf', 'base'].includes(g.zone)) kill(s, g); }
       for (const c of [...A, ...D]) c.dmg = 0; // combat cleanup heals all units
-      if (A.some(isU) && !D.some(isU)) legendTrigger(s, att, 'winCombat', { bf: a.bf });
-      else if (D.some(isU) && !A.some(isU)) legendTrigger(s, def, 'winCombat', { bf: a.bf });
+      // the side left alone after combat wins it: its legend and its units ("When I win a combat") trigger
+      const won = A.some(isU) && !D.some(isU) ? att : D.some(isU) && !A.some(isU) ? def : null;
+      if (won) { legendTrigger(s, won, 'winCombat', { bf: a.bf }); for (const c of bf.units[won].filter(isU)) trigger(s, c, 'winCombat', won, a.bf); }
       if (A.some(isU) && !D.some(isU)) { syncCtrl(s); conquer(s, a.bf, att); }
       else if (A.length && D.length) { // attackers survive but don't win: recalled to base
         for (const c of A.splice(0)) s.players[att].zones.base.push(c);
