@@ -802,16 +802,21 @@ body.dragging-hidden .bf .bfhidden.me:empty::after { content: '?'; margin: auto;
 .track { position: absolute; display: flex; flex-direction: column; gap: 2px; z-index: 5; }
 .half.me .track { left: -52px; bottom: 0; flex-direction: column-reverse; }
 .half.op .track { right: -52px; top: 0; }
-.track .pip { width: 30px; height: 30px; border-radius: 50%; border: 1px solid #2f5577; background: #0b1a2b; color: #7d9bb8; font: 700 13px var(--f-cond); display: grid; place-items: center; padding: 0; cursor: pointer; transition: background .3s, color .3s, border-color .3s, transform .3s var(--ease), box-shadow .3s; }
-.track .pip:nth-child(even) { transform: translateX(14px); }
-.track .pip:hover { border-color: var(--gold); color: var(--gold2); }
-.track .pip.past { border-color: #3d6a92; color: #a9c3dc; }
-.half.me .track .pip.on { background: radial-gradient(circle at 40% 30%, #4da3ff, #1b4f86); border-color: #9cd0ff; color: #fff; box-shadow: 0 0 14px #4da3ff88; }
-.half.op .track .pip.on { background: radial-gradient(circle at 40% 30%, #ff6b7d, #8a1d2c); border-color: #ffb0ba; color: #fff; box-shadow: 0 0 14px #e8405788; }
-.track .pip.win { border-width: 2px; border-color: var(--gold3); color: var(--gold2); font-size: 15px; width: 34px; height: 34px; }
+.track .tpip { width: 30px; height: 30px; border-radius: 50%; border: 1px solid #2f5577; background: #0b1a2b; color: #7d9bb8; font: 700 13px var(--f-cond); display: grid; place-items: center; padding: 0; cursor: pointer; transition: background .3s, color .3s, border-color .3s, transform .3s var(--ease), box-shadow .3s; }
+.track .tpip:nth-child(even) { transform: translateX(14px); }
+.track .tpip:hover { border-color: var(--gold); color: var(--gold2); }
+.track .tpip.past { border-color: #3d6a92; color: #a9c3dc; }
+.half.me .track .tpip.on { background: radial-gradient(circle at 40% 30%, #4da3ff, #1b4f86); border-color: #9cd0ff; color: #fff; box-shadow: 0 0 14px #4da3ff88; }
+.half.op .track .tpip.on { background: radial-gradient(circle at 40% 30%, #ff6b7d, #8a1d2c); border-color: #ffb0ba; color: #fff; box-shadow: 0 0 14px #e8405788; }
+.track .tpip.win { border-width: 2px; border-color: var(--gold3); color: var(--gold2); font-size: 15px; width: 34px; height: 34px; }
 .hud .score .pips { display: none; }
-@media (max-height: 820px) { .track .pip { width: 24px; height: 24px; font-size: 11px; } .track .pip.win { width: 28px; height: 28px; } .track .pip:nth-child(even) { transform: translateX(10px); } }
+@media (max-height: 820px) { .track .tpip { width: 24px; height: 24px; font-size: 11px; } .track .tpip.win { width: 28px; height: 28px; } .track .tpip:nth-child(even) { transform: translateX(10px); } }
 .board .handwrap.zone { border: none; background: none; }
 /* battlefield card bigger, on the left of the divider; units keep clear of it */
 .board .bf .bfcard { --cw: clamp(64px, 20cqh, 120px); }
 .board .bf .units[data-z$=":p1"], .board .bf .units[data-z$=":p2"] { padding-left: calc(clamp(64px, 20cqh, 120px) * 1.396 + 70px); }
+
+/* score: only on the tracks beside the board (not in the top bar) */
+.hud .score > button, .hud .score .val, .hud .score .pips { display: none; }
+.board { padding-right: 64px; padding-left: 64px; }
+.half.me .track { left: -58px; } .half.op .track { right: -58px; }

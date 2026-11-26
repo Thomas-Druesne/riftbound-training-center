@@ -526,10 +526,34 @@ const BF_FX = {
   "Bandle Scouts' Academy": { hide: [SELF({ kind: 'token', name: 'Gold', n: 1, ex: true })] },
 };
 
+// Legends' passive abilities, by event (the legend's player): conquer, hold, winCombat, endTurn, begin, playSpell,
+// playUnit, playHidden, stunEnemy, enemyDies. exMe: "you may exhaust me" (asked, the legend must be ready).
+const LMAY = (text, fx, o = {}) => ({ who: 'self', kind: 'may', text, fx, exMe: true, ...o });
+const LEGEND_FX = {
+  "Rek'Sai, Void Burrower": { conquer: [LMAY('Épuiser Rek\'Sai pour révéler les 2 cartes du dessus et en jouer une ?', [{ who: 'self', kind: 'pick', from: 'top', n: 2, then: 'playPaid' }])] },
+  'Garen, Might of Demacia': { conquer: [{ who: 'self', kind: 'draw', n: 2, cond: 'units4here' }] },
+  'Irelia, Blade Dancer': { conquer: [{ who: 'self', kind: 'may', text: 'Payer 1 énergie pour redresser Irelia ?', pay: { e: 1, p: [] }, cond: 'legendEx', fx: [{ who: 'self', kind: 'readyLegend' }] }] },
+  'LeBlanc, Deceiver': { conquer: [LMAY('Défausser 1 carte et épuiser LeBlanc pour copier une unité ici ?', [{ who: 'self', kind: 'discard', n: 1 }, { who: 'self', kind: 'reflectHere' }], { cond: 'handUnitsHere' })],
+    hold: [LMAY('Défausser 1 carte et épuiser LeBlanc pour copier une unité ici ?', [{ who: 'self', kind: 'discard', n: 1 }, { who: 'self', kind: 'reflectHere' }], { cond: 'handUnitsHere' })] },
+  'Vex, Gloomist': { hold: [LMAY('Épuiser Vex pour piocher 1 ?', [{ who: 'self', kind: 'draw', n: 1 }])] },
+  'Renata Glasc, Chem-Baroness': { hold: [LMAY('Épuiser Renata pour un jeton Gold épuisé ?', [{ who: 'self', kind: 'token', name: 'Gold', n: 1, ex: true }])] },
+  'Poppy, Keeper of the Hammer': { hold: [{ who: 'self', kind: 'xp', n: 1 }] },
+  'Draven, Glorious Executioner': { winCombat: [{ who: 'self', kind: 'draw', n: 1 }] },
+  "Kha'Zix, Voidreaver": { winCombat: [{ who: 'self', kind: 'xp', n: 1 }] },
+  'Annie, Dark Child': { endTurn: [{ who: 'self', kind: 'readyRunes', n: 2 }] },
+  'Jinx, Loose Cannon': { begin: [{ who: 'self', kind: 'draw', n: 1, cond: 'hand<=1' }] },
+  'Lux, Lady of Luminosity': { playSpell: [{ who: 'self', kind: 'draw', n: 1, cond: 'cost5' }] },
+  'Nasus, Curator of the Sands': { playUnit: [LMAY('Épuiser Nasus pour redresser 2 runes ?', [{ who: 'self', kind: 'readyRunes', n: 2 }], { cond: 'cost7' })] },
+  'Volibear, Relentless Storm': { playUnit: [LMAY('Épuiser Volibear pour canaliser 1 rune épuisée ?', [{ who: 'self', kind: 'channel', n: 1, ex: true }], { cond: 'mightyPlayed' })] },
+  "Evelynn, Agony's Embrace": { playHidden: [{ who: 'self', kind: 'draw', n: 1, cond: 'oncePerTurn' }, { who: 'self', kind: 'discard', n: 1, cond: 'notMyTurn' }] },
+  'Leona, Radiant Dawn': { stunEnemy: [{ who: 'self', kind: 'buff' }] },
+  'Sivir, Battle Mistress': { enemyDies: [{ who: 'self', kind: 'readyLegend' }] },
+};
+
 // "You may pay <cost> as an additional cost to play me"
 function extraCost(text) {
   const m = /You may pay ((?::rb_(?:energy_\d+|rune_\w+):)+) as an additional cost to play me/.exec(text || '');
   return m ? parseCost(m[1]) : null;
 }
 
-module.exports = { extraCost, BF_FX, abilities, auras, triggerFx, CARD_FX, parseCost, kwCost, cardCost, sumCost, planCost, tokensIn, deathTokens, SYNTH_TOKENS, kw, spellFx, planPay, combat, domOf, playFx, entersReady };
+module.exports = { LEGEND_FX, extraCost, BF_FX, abilities, auras, triggerFx, CARD_FX, parseCost, kwCost, cardCost, sumCost, planCost, tokensIn, deathTokens, SYNTH_TOKENS, kw, spellFx, planPay, combat, domOf, playFx, entersReady };

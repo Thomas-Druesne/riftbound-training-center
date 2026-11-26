@@ -1248,7 +1248,7 @@ function renderTracks() {
     const p = el.dataset.track, sc = S.v.players[p].score, win = S.v.winScore || 8, key = sc + '/' + win;
     if (el.dataset.key === key) continue;
     el.dataset.key = key; el.innerHTML = '';
-    for (let n = 0; n <= win; n++) el.append(h('button', { class: 'pip' + (n === sc ? ' on' : '') + (n === win ? ' win' : '') + (n < sc ? ' past' : ''), title: `${pname(p)} : ${n} point${n > 1 ? 's' : ''}`, onclick: () => n !== sc && send({ type: 'score', p, delta: n - sc }) }, String(n)));
+    for (let n = 0; n <= win; n++) el.append(h('button', { class: 'tpip' + (n === sc ? ' on' : '') + (n === win ? ' win' : '') + (n < sc ? ' past' : ''), title: `${pname(p)} : ${n} point${n > 1 ? 's' : ''}`, onclick: () => n !== sc && send({ type: 'score', p, delta: n - sc }) }, String(n)));
   }
 }
 // the opponent's hand hangs under the top bar, centred between the die button and "Annuler"

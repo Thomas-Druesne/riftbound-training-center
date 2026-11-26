@@ -45,6 +45,9 @@ function kwOf(s, c) {
     for (const n of ['tank', 'ganking', 'backline']) k[n] = k[n] || x[n];
   }
   if (c.tg) k.ganking = true;
+  const L = c.owner && legendOf(s, c.owner), ln = L && cd(s, L).name;
+  if (ln === 'Rumble, Mechanized Menace' && (cd(s, c).tags || []).includes('Mech')) k.shield += 1;
+  if (ln === 'Lucian, Purifier') k.assault += gearOn(s, c).filter(g => /\[Equip\]/.test(cd(s, g).text || '')).length;
   return k;
 }
 function hp(s, c, role) {
@@ -71,6 +74,11 @@ function auraBonus(s, c, d) {
   }
   const b = f.bf != null && s.bfs[f.bf].card;
   if (b) for (const a of R.auras(cd(s, b))) if (a.who === 'any' && (!a.champion || d.supertype === 'Champion')) n += a.n;
+  const lg = legendOf(s, f.p) && cd(s, legendOf(s, f.p)).name, sd0 = s.showdown;
+  if (lg === 'Master Yi, Wuju Bladesman' && sd0 && f.bf != null && sd0.bf === f.bf && sd0.att !== f.p && s.bfs[f.bf].units[f.p].length === 1) n += 2;
+  if (lg === 'Master Yi, Wuju Master' && (s.players[f.p].xp || 0) >= 6) n += 1;
+  // Ahri: an enemy unit attacking a battlefield I control gets -1 (to a minimum of 1)
+  if (sd0 && f.bf != null && sd0.bf === f.bf && sd0.att === f.p && s.bfs[f.bf].ctrl === other(f.p)) { const al = legendOf(s, other(f.p)); if (al && cd(s, al).name === 'Ahri, Nine-Tailed Fox') n -= 1; }
   if (b) {
     const bn = cd(s, b).name, sd = s.showdown;
     if (bn === 'Kinkou Temple' && (kwOf(s, c).tank || c.tt)) n += 1;
@@ -96,6 +104,7 @@ function conquer(s, b, p) {
   bf.ctrl = p;
   for (const c of bf.units[p].slice()) trigger(s, c, 'conquer', p, b);
   bfTrigger(s, b, 'conquer', p);
+  legendTrigger(s, p, 'conquer', { bf: b });
   const sc = scoredOf(s, p);
   if (sc.includes(b)) { log(s, `${seatName(s, p)} reprend ${nm} (déjà marqué ce tour : pas de point).`); return; }
   sc.push(b);
@@ -131,6 +140,7 @@ function kill(s, f) {
   detach(s, f.c);
   toTrash(s, f.c);
   log(s, `☠ ${name(s, f.c)} est détruit.`);
+  if (f.p && cd(s, f.c).type === 'Unit' && (f.zone === 'bf' || f.zone === 'base')) legendTrigger(s, other(f.p), 'enemyDies');
   trigger(s, f.c, 'deathknell', f.c.owner, f.zone === 'bf' ? f.bf : null);
   if (f.p && cd(s, f.c).type === 'Unit') for (const u of mineOnBoard(s, f.p)) trigger(s, u, 'allyDies', f.p, null);
 }
@@ -146,6 +156,20 @@ function bfTrigger(s, b, ev, p) {
   if (!auto(s, p)) { log(s, `↳ ${d.name} (${BF_EV[ev]}, ${seatName(s, p)}) : « ${d.text} » À appliquer à la main.`); return; }
   log(s, `↳ ${d.name} (${BF_EV[ev]}, ${seatName(s, p)}) : effet du champ de bataille.`);
   (s.fxQueue || (s.fxQueue = [])).push(...fx.map(e => ({ ...e, by: p, card: d.name, src: bf.card.iid, bfAt: b })));
+  if (!s.fxRun) runFx(s);
+}
+// A legend's passive ability: written in the log; applied by the engine in auto mode, by hand otherwise.
+const legendOf = (s, p) => s.players[p].zones.legend[0];
+function legendTrigger(s, p, ev, ctx = {}) {
+  const L = legendOf(s, p); if (!L) return;
+  const d = cd(s, L), fx = ((R.LEGEND_FX || {})[d.name] || {})[ev];
+  if (!fx || !fx.length) return;
+  const q = fx.map(e => ({ ...e, by: p, card: d.name, src: L.iid, bfAt: ctx.bf, ctxCost: ctx.cost, ctxMighty: ctx.mighty }));
+  const could = e => (!e.exMe || !L.ex) && (!e.cond || e.cond === 'oncePerTurn' || mayCond(s, p, e));
+  if (!q.some(could)) return; // nothing would happen: no log line
+  if (!auto(s, p)) { log(s, `↳ ${d.name} (légende) : « ${d.text} » À appliquer à la main.`); return; }
+  log(s, `↳ ${d.name} (légende) : capacité déclenchée.`);
+  (s.fxQueue || (s.fxQueue = [])).push(...q);
   if (!s.fxRun) runFx(s);
 }
 // can player p use this optional ("you may") effect now?
@@ -166,6 +190,14 @@ function mayCond(s, p, e) {
     case 'notMyTurn': return s.active !== p;
     case 'runeDeckEmpty': return !s.players[p].zones.runeDeck.length;
     case 'paidExtra': return !!e.paidExtra;
+    case 'units4here': return e.bfAt != null && s.bfs[e.bfAt].units[p].filter(c => cd(s, c).type === 'Unit').length >= 4;
+    case 'legendEx': { const L = legendOf(s, p); return !!L && L.ex; }
+    case 'handUnitsHere': return s.players[p].zones.hand.length > 0 && here.length > 0;
+    case 'hand<=1': return s.players[p].zones.hand.length <= 1;
+    case 'cost5': return (e.ctxCost || 0) >= 5;
+    case 'cost7': return (e.ctxCost || 0) >= 7;
+    case 'mightyPlayed': return !!e.ctxMighty;
+    case 'oncePerTurn': { const k = 'once:' + e.card; if ((s.onceT || {})[k] === s.turn) return false; (s.onceT || (s.onceT = {}))[k] = s.turn; return true; }
     case 'xp6': return (s.players[p].xp || 0) >= 6;
     case 'showHidden': return s.players[p].zones.hand.some(c => R.kw(cd(s, c).text).hidden);
     case 'hasGear': return s.players[p].zones.base.some(g => cd(s, g).type === 'Gear' && /\[Equip\]/.test(cd(s, g).text || ''));
@@ -355,17 +387,26 @@ function runFxLoop(s) {
     else if (e.kind === 'burn') { const k = burn(s, to, e.n); log(s, `${T} brûle ${k} carte${k > 1 ? 's' : ''} du dessus de son deck (${e.card}).`); }
     else if (e.kind === 'may') {
       if (!mayCond(s, to, e)) continue;
+      if (e.exMe) { const f = e.src && find(s, e.src); if (!f || f.c.ex) continue; }
       if (e.pay && !R.planCost(runesOf(s, to), s.players[to].pool || newPool(), e.pay)) { log(s, `${e.card} : ${T} ne peut pas payer (${costText(e.pay)}).`); continue; }
       s.pending = { kind: 'confirm', to, n: 0, by: e.by, card: e.card, text: e.text, fx: e, ai: e.ai !== false };
       log(s, `${T} choisit d’utiliser ou non ${e.card}.`);
     }
     else if (e.kind === 'pick') {
       const z = s.players[to].zones, pool = e.from === 'top' ? z.main.slice(0, e.n) : z.trash, F = e.filter || {};
-      const ok = c => { const d = cd(s, c); return (!F.hidden || R.kw(d.text).hidden) && (!F.types || F.types.includes(d.type)) && (F.maxE == null || (d.energy || 0) <= F.maxE) && (F.maxP == null || (d.power || 0) <= F.maxP); };
+      const afford = c => e.then !== 'playPaid' || !auto(s, to) || !!R.planCost(runesOf(s, to), s.players[to].pool || newPool(), R.cardCost(cd(s, c)));
+      const ok = c => { const d = cd(s, c); return afford(c) && ['Unit', 'Gear', 'Spell'].includes(d.type) && (!F.hidden || R.kw(d.text).hidden) && (!F.types || F.types.includes(d.type)) && (F.maxE == null || (d.energy || 0) <= F.maxE) && (F.maxP == null || (d.power || 0) <= F.maxP); };
       const cards = pool.filter(ok).map(c => c.iid);
       if (!cards.length) { log(s, `${e.card} : aucune carte possible.`); if (e.from === 'top') for (const c of z.main.splice(0, e.n)) z.main.push(c); continue; }
       s.pending = { kind: 'pick', to, n: 1, by: e.by, card: e.card, cards, from: e.from, fx: e, opt: true, top: e.from === 'top' ? pool.map(c => c.iid) : null };
       log(s, `${T} choisit une carte ${e.from === 'top' ? `parmi les ${pool.length} du dessus de son deck` : 'dans sa défausse'} (${e.card}).`);
+    }
+    else if (e.kind === 'readyRunes') { let k = 0; for (const r of s.players[to].zones.runes) if (r.ex && k < e.n) { r.ex = false; k++; } if (k) log(s, `${T} redresse ${k} rune${k > 1 ? 's' : ''} (${e.card}).`); }
+    else if (e.kind === 'reflectHere') { // LeBlanc: a ready Reflection copy of the best other unit there, with [Temporary]
+      const at = e.bfAt != null ? s.bfs[e.bfAt].units[to] : null; if (!at) continue;
+      const best = at.filter(c => cd(s, c).type === 'Unit').sort((a, b) => hp(s, b) - hp(s, a))[0]; if (!best) continue;
+      const cp = mk(s, best.cid, to); Object.assign(cp, { reflect: true, tmpT: true, ex: false }); at.push(cp);
+      log(s, `${T} crée une copie de ${name(s, best)} (${e.card}).`);
     }
     else if (e.kind === 'decree') { s.decree = s.turn; log(s, `Ce tour, toute unité qui subit des dégâts est détruite (${e.card}).`); }
     else if (e.kind === 'freeHide') { s.freeHide = { p: to, turn: s.turn }; log(s, `${T} peut cacher des cartes sans payer ce tour (${e.card}).`); }
@@ -526,7 +567,7 @@ function applyTarget(s, e, iid, p) {
   if ((e.op === 'dmg' || e.op === 'dmgSplash') && s.noSpellDmg === s.turn) { log(s, `Dégâts prévenus (${e.card}).`); return; }
   if (e.op === 'dmg') { c.dmg = (c.dmg || 0) + e.n; log(s, `${N} subit ${e.n} dégât${e.n > 1 ? 's' : ''}${src}.`); }
   else if (e.op === 'kill') { kill(s, f); syncCtrl(s); return; }
-  else if (e.op === 'stun') { c.st = true; log(s, `${N} est étourdi${src}.`); }
+  else if (e.op === 'stun') { c.st = true; log(s, `${N} est étourdi${src}.`); if (f.p && f.p !== p) legendTrigger(s, p, 'stunEnemy'); }
   else if (e.op === 'might' && e.perTags) { const n = e.perTags.filter(t => unitsOf(s, p).some(u => (cd(s, u).tags || []).includes(t))).length; c.tb = (c.tb || 0) + n; log(s, `${N} gagne +${n} force ce tour${src}.`); }
   else if (e.op === 'might') { let n = e.perEnemy ? e.n * (f.zone === 'bf' ? s.bfs[f.bf].units[other(f.p)].length : 0) : e.alone && f.zone === 'bf' && s.bfs[f.bf].units[f.p].length === 1 ? e.n + e.alone : e.n;
     if (e.min != null) n = Math.max(n, Math.min(0, e.min - hp(s, c))); c.tb = (c.tb || 0) + n; e = { ...e, n }; log(s, `${N} gagne ${e.n > 0 ? '+' : ''}${e.n} force ce tour${src}.`); }
@@ -867,13 +908,14 @@ function startTurn(s, p) {
     if (!s.players[p].begun) bfTrigger(s, i, 'firstBegin', p);
   });
   s.players[p].begun = true;
+  legendTrigger(s, p, 'begin');
   if (!auto(s, p)) { // manual mode: the player readies, scores holds, channels and draws by hand
     const second = s.turn <= 2 && p !== s.first && !s.players[p].channeledBonus;
     if (second) s.players[p].channeledBonus = true;
     const held = s.bfs.filter(b => b.ctrl === p).length;
     log(s, `— Tour ${s.turn} · ${W} : à vous de redresser, ${held ? `marquer ${held} point${held > 1 ? 's' : ''} (tenir), ` : ''}canaliser ${second ? 3 : 2} runes et piocher 1 carte.`);
     s.started = s.turn;
-    s.bfs.forEach((b, i) => { if (b.ctrl === p) { for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); bfTrigger(s, i, 'hold', p); } });
+    s.bfs.forEach((b, i) => { if (b.ctrl === p) { for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); bfTrigger(s, i, 'hold', p); legendTrigger(s, p, 'hold', { bf: i }); } });
     return;
   }
   readyAll(s, p);
@@ -890,7 +932,7 @@ function startTurn(s, p) {
   const d = auto(s, p) ? draw(s, p, 1) : 0; // a human draws by hand (click the deck)
   log(s, `— Tour ${s.turn} · ${W} : réveil, ${held ? `+${held} point${held > 1 ? 's' : ''} (tenir), ` : ''}canalise ${ch}, ${auto(s, p) ? `pioche ${d}` : "à vous de piocher (cliquez sur votre deck)"}.`);
   s.started = s.turn;
-  s.bfs.forEach((b, i) => { if (b.ctrl === p) { for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); bfTrigger(s, i, 'hold', p); } });
+  s.bfs.forEach((b, i) => { if (b.ctrl === p) { for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); bfTrigger(s, i, 'hold', p); legendTrigger(s, p, 'hold', { bf: i }); } });
   winCheck(s, p);
 }
 
@@ -1142,6 +1184,8 @@ function act(s, a, who) {
         (s.chain || (s.chain = [])).push(c);
         log(s, `✦ ${seatName(s, p)} lance ${d.name}${how}. ${s.chain.length > 1 ? 'En réponse sur la pile.' : 'Sur la pile : l’adversaire peut réagir.'}`);
         for (const u of mineOnBoard(s, p)) trigger(s, u, 'playSpell', p, null);
+        legendTrigger(s, p, 'playSpell', { cost: paid ? paid.e : d.energy || 0 });
+        if (fromHidden) legendTrigger(s, p, 'playHidden');
         return null;
       }
       // units enter exhausted unless Accelerate was paid or the card says "I enter ready"; gear enters ready at base
@@ -1156,6 +1200,10 @@ function act(s, a, who) {
       if (toBf != null && d.type === 'Unit') arrive(s, toBf, p);
       if (s.showdown && s.showdown.last === p) s.showdown.focus = other(p);
       if (d.type === 'Unit') for (const u of mineOnBoard(s, p)) if (u !== c) trigger(s, u, 'playUnit', p, null);
+      if (d.type === 'Unit') legendTrigger(s, p, 'playUnit', { cost: d.energy || 0, mighty: hp(s, c) >= 5 });
+      if (fromHidden) legendTrigger(s, p, 'playHidden');
+      // Riven, The Exile: units played to battlefields you control enter ready
+      if (d.type === 'Unit' && toBf != null && s.bfs[toBf].ctrl === p && legendOf(s, p) && cd(s, legendOf(s, p)).name === 'Riven, The Exile') c.ex = false;
       // play effects: everything for the AI (a.targets / a.bf pre-select its choices); for a human, only
       // what the opponent must decide or reveal (discard, kill one of their units, reveal their hand)
       const bfAt = toBf != null && (d.type === 'Unit' || fromHidden) ? toBf : null;
@@ -1290,6 +1338,7 @@ function act(s, a, who) {
         if (e.from === 'top') { const rest = z.main.filter(x => q.top.includes(x.iid)); z.main = z.main.filter(x => !q.top.includes(x.iid)).concat(rest); }
         if (!c) log(s, `${W2} ne prend aucune carte (${q.card}).`);
         else if (e.then === 'hand') { z.hand.push(c); log(s, `${W2} prend ${name(s, c)} en main (${q.card}).`); }
+        else if (e.then === 'playPaid' && auto(s, q.to) && !pay(s, q.to, R.cardCost(cd(s, c)))) { z.main.push(c); log(s, `${W2} ne peut pas payer ${name(s, c)} : recyclé (${q.card}).`); }
         else if (cd(s, c).type === 'Spell') { // cast for free: on the stack like any spell
           c.cb = { by: q.to, seen: false, flow: false, recycle: !!e.recycle, repeat: false, legion: false, targets: [], fx: true };
           (s.chain || (s.chain = [])).push(c);
@@ -1304,6 +1353,7 @@ function act(s, a, who) {
       if (q.kind === 'confirm') {
         const e = q.fx;
         if (a.yes && e.pay && !pay(s, q.to, e.pay)) return `Pas assez de runes (${costText(e.pay)}).`;
+        if (a.yes && e.exMe) { const f = e.src && find(s, e.src); if (f) f.c.ex = true; }
         s.pending = null;
         log(s, `${seatName(s, q.to)} ${a.yes ? 'utilise' : 'n’utilise pas'} ${q.card}.`);
         const then = a.yes ? e.fx : e.elseFx || [];
@@ -1384,6 +1434,8 @@ function act(s, a, who) {
       for (const u of [...deadA, ...deadD]) { const g = find(s, u.c.iid); if (g) kill(s, g); }
       if (s.decree === s.turn) for (const u of [...WA, ...WD]) if (u.dmg > 0) { const g = find(s, u.c.iid); if (g && ['bf', 'base'].includes(g.zone)) kill(s, g); }
       for (const c of [...A, ...D]) c.dmg = 0; // combat cleanup heals all units
+      if (A.some(isU) && !D.some(isU)) legendTrigger(s, att, 'winCombat', { bf: a.bf });
+      else if (D.some(isU) && !A.some(isU)) legendTrigger(s, def, 'winCombat', { bf: a.bf });
       if (A.some(isU) && !D.some(isU)) { syncCtrl(s); conquer(s, a.bf, att); }
       else if (A.length && D.length) { // attackers survive but don't win: recalled to base
         for (const c of A.splice(0)) s.players[att].zones.base.push(c);
@@ -1487,6 +1539,7 @@ function act(s, a, who) {
       if (auto(s, s.active)) s.bfs.forEach((b, i) => { if (b.units.p1.some(c => cd(s, c).type === 'Unit') && b.units.p2.some(c => cd(s, c).type === 'Unit')) act(s, { type: 'fight', bf: i, att: s.active }, s.active); });
       for (const c of [...s.bfs.flatMap(b => [...b.units.p1, ...b.units.p2]), ...s.players.p1.zones.base, ...s.players.p2.zones.base]) { c.dmg = 0; c.tb = 0; c.ta = 0; c.ts = 0; c.tt = false; c.st = false; c.tg = false; }
       for (const p of SEATS) for (const c of s.players[p].zones.hand) c.rev = false;
+      legendTrigger(s, s.active, 'endTurn');
       const er = s.endReady && s.endReady[s.active];
       if (er) { let k = 0; for (const r of s.players[s.active].zones.runes) if (r.ex && k < er) { r.ex = false; k++; } delete s.endReady[s.active]; log(s, `${seatName(s, s.active)} redresse ${k} rune${k > 1 ? 's' : ''} (Targon's Peak).`); }
       for (const p of SEATS) s.players[p].pool = newPool(); // unspent energy/power is lost

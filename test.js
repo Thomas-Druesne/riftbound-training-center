@@ -549,9 +549,10 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     assert.equal(g.apply(s, { type: 'move', seat: A, iid: 'big', to: { bf: 0, side: A } }), null);
     assert.ok(s.showdown, 'showdown');
     if (s.showdown.focus === A) g.apply(s, { type: 'pass', seat: A });
+    const before = [g.hp(s, mine), g.hp(s, big)];
     assert.equal(g.apply(s, { type: 'play', seat: H, iid: 'sw', targets: ['small', 'big'] }), null, 'the hidden Switcheroo is cast');
     g.apply(s, { type: 'chainPass', seat: A }); if (s.chain.length) g.apply(s, { type: 'chainResolve', seat: H });
-    assert.deepEqual([g.hp(s, mine), g.hp(s, big)], [6, 2], 'Mights swapped');
+    assert.deepEqual([g.hp(s, mine), g.hp(s, big)], [before[1], before[0]], 'Mights swapped');
     while (s.showdown) { const f = s.showdown.focus; assert.equal(g.apply(s, { type: 'pass', seat: f }), null); }
     assert.deepEqual([g.find(s, 'small').zone, g.find(s, 'big').zone], ['bf', 'trash'], 'my unit survives, theirs dies');
   }
@@ -573,6 +574,23 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     assert.equal(s.chain[s.chain.length - 1].iid, 'sw2', 'Switcheroo cast from the trash');
     g.apply(s, { type: 'chainPass', seat: other(P) }); g.apply(s, { type: 'chainResolve', seat: P });
     assert.equal(Z.main[Z.main.length - 1].iid, 'sw2', 'then recycled');
+  }
+  { // legends: Rek'Sai on conquer (auto mode) asks, exhausts, reveals the top 2 and plays one; Draven draws on a won combat
+    const s = mk(), P = s.active, Z = s.players[P].zones;
+    for (const n of ["Rek'Sai, Void Burrower", 'Draven, Glorious Executioner']) s.cd[by(n).id] = by(n);
+    s.auto = { p1: true, p2: true }; Z.runes.forEach(r => (r.ex = false));
+    Z.legend = [card(s, 'lg', "Rek'Sai, Void Burrower", P)];
+    const u = Z.main.find(c => g.cd(s, c).type === 'Unit' && !/conquer|move/i.test(g.cd(s, c).text || '')); Z.main.splice(Z.main.indexOf(u), 1); u.ex = false; Z.base.push(u);
+    const cheap = Z.main.findIndex(c => ['Unit', 'Gear'].includes(g.cd(s, c).type) && (g.cd(s, c).energy || 0) <= 2 && !(g.cd(s, c).power));
+    Z.main.unshift(...Z.main.splice(cheap, 1));
+    assert.equal(g.apply(s, { type: 'move', seat: P, iid: u.iid, to: { bf: 0, side: P } }), null);
+    assert.equal(s.pending && s.pending.kind, 'confirm', "Rek'Sai asks on conquer");
+    assert.equal(g.apply(s, { type: 'resolve', seat: P, yes: true }), null);
+    assert.ok(Z.legend[0].ex, "Rek'Sai exhausted");
+    assert.equal(s.pending && s.pending.kind, 'pick', 'choose among the top 2');
+    const top = s.pending.cards[0];
+    assert.equal(g.apply(s, { type: 'resolve', seat: P, iids: [top] }), null);
+    assert.ok(['base', 'bf'].includes(g.find(s, top).zone), 'the card is played');
   }
   { // Imperial Decree: 1 damage kills; Tactical Retreat: recalled instead of dying; Pyke pays its additional cost
     const s = mk(), P = s.active, O = other(P), Z = s.players[P].zones;
