@@ -183,8 +183,15 @@ function aiNext(r, peek) {
   catch (e) {
     console.error('AI error:', e);
     r.ai.mem = {};
+    return aiFallback(r);
+  }
+}
+// the simplest legal move: answer a prompt (decline / first choices), let the stack resolve, pass, end the turn
+function aiFallback(r) {
+  const s = r.state, me = r.ai.seat;
+  {
     const top = s.chain && s.chain[s.chain.length - 1];
-    if (s.pending) return s.pending.to === me ? (s.pending.kind === 'confirm' ? { type: 'resolve', yes: false } : s.pending.kind === 'bf' ? { type: 'resolve', bf: s.pending.opts[0] } : { type: 'resolve', iids: s.pending.opt ? [] : (s.pending.opts || []).slice(0, s.pending.n) }) : null;
+    if (s.pending) return s.pending.to === me ? (s.pending.kind === 'confirm' ? { type: 'resolve', yes: false } : s.pending.kind === 'bf' ? { type: 'resolve', bf: s.pending.opts[0] } : { type: 'resolve', iids: s.pending.opt ? [] : s.pending.kind === 'discard' ? s.players[me].zones.hand.slice(0, s.pending.n).map(c => c.iid) : ['sacrifice', 'buff'].includes(s.pending.kind) ? [...s.players[me].zones.base, ...s.bfs.flatMap(b => b.units[me])].filter(c => game.cd(s, c).type === 'Unit' && c.iid !== s.pending.exclude).slice(0, 1).map(c => c.iid) : (s.pending.opts || []).slice(0, s.pending.n) }) : null;
     if (top) return top.cb.by !== me ? (top.cb.seen ? null : { type: 'chainPass' }) : top.cb.seen ? { type: 'chainResolve' } : null;
     if (s.showdown) return s.showdown.focus === me ? { type: 'pass' } : null;
     return s.active === me && s.stage === 'main' ? { type: 'endTurn' } : null;
@@ -211,8 +218,13 @@ function aiTick(r) {
     const err = game.apply(r.state, { ...act, seat: r.ai.seat, p: r.ai.seat });
     if (err) {
       r.ai.mem.q = []; // replan from the current board
-      if (++r.ai.errors > 15) { r.ai.errors = 0; game.apply(r.state, { type: 'endTurn', seat: r.ai.seat, p: r.ai.seat }); }
-    }
+      if (++r.ai.errors > 6) { // keeps being refused: take the simplest legal move so the game never hangs
+        console.error('AI refused 7x:', JSON.stringify(act), err);
+        r.ai.errors = 0; r.ai.mem = {};
+        const fb = aiFallback(r);
+        if (fb) game.apply(r.state, { ...fb, seat: r.ai.seat, p: r.ai.seat });
+      }
+    } else r.ai.errors = 0;
     broadcast(r);
     aiTick(r);
   }, (AI_DELAY[first.type] || 600) * AI_SPEED);
@@ -246,7 +258,7 @@ http.createServer(async (req, res) => {
       const extra = c => {
         const x = c.type === 'Spell' ? { nt: R.playFx(c).filter(e => e.kind === 'target').length } : {};
         const ab = R.abilities(c);
-        if (ab.length) x.ab = ab.map(a => ({ text: a.text, e: a.cost.e, p: a.cost.p.length, nt: a.fx.filter(e => e.kind === 'target').length, kill: a.kill, xp: a.xp, other: a.other }));
+        if (ab.length) x.ab = ab.map(a => ({ text: a.text, e: a.cost.e, p: a.cost.p.length, nt: a.fx.filter(e => e.kind === 'target').length, kill: a.kill, xp: a.xp, other: a.other, disemp: a.disemp }));
         return Object.keys(x).length ? { ...c, ...x } : c;
       };
       return json(res, 200, [...(await loadCards(false)).map(extra), ...R.SYNTH_TOKENS]);

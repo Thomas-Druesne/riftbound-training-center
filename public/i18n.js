@@ -84,7 +84,7 @@ const EN = {
   'Cliquez sur l’unité alliée qui reçoit le buff (+1 force si elle n’en a pas déjà un).': 'Click the friendly unit that gets the buff (+1 Might if it has none yet).',
   'Cliquez sur la cible. Les unités ennemies sont marquées en rouge.': 'Click the target. Enemy units are marked in red.', 'Cliquez sur le champ de bataille visé.': 'Click the battlefield.',
   'Le dessus de votre deck. Cliquez sur les cartes à recycler sous le deck, les autres restent dessus.': 'The top of your deck. Click the cards to recycle to the bottom; the others stay on top.',
-  'Tout garder': 'Keep all', 'Valider': 'Confirm', 'Fermer': 'Close', 'Vide': 'Empty', 'Mélanger et fermer': 'Shuffle and close',
+  'Non jouable (coût ou type)': 'Not playable (cost or type)', 'retirer Empowered': 'disempower', 'Ne rien prendre': 'Take nothing', 'Tout garder': 'Keep all', 'Valider': 'Confirm', 'Fermer': 'Close', 'Vide': 'Empty', 'Mélanger et fermer': 'Shuffle and close',
   'Ordre : du dessus vers le dessous. Glissez une carte vers le plateau ou clic droit pour la déplacer.': 'Order: top to bottom. Drag a card to the board or right-click it to move it.',
   'Glissez une carte vers le plateau ou clic droit pour la déplacer.': 'Drag a card to the board or right-click it to move it.',
   // pre-game

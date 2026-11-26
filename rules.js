@@ -463,8 +463,12 @@ function abilities(card) {
       reaction: /\[Reaction\]/.test(head), action: /\[Action\]/.test(head), level: lv ? +lv[1] : 0,
     });
   }
-  abilCache.set(text, out);
-  return out;
+  const ov = LEGEND_AB[card.name], fl = AB_FLAGS[card.name];
+  const res = ov ? ov.map((o, i) => ({ i, kill: false, xp: 0, other: false, reaction: false, action: false, level: 0, ...o }))
+    : fl ? out.map((a, i) => ({ ...a, ...(fl[i] || {}) })) : out;
+  for (const a of res) if (ov) CARD_FX[card.name + '@' + a.i] = a.fx; // the AI plans abilities through playFx(name@i)
+  abilCache.set(text, res);
+  return res;
 }
 // Static Might bonuses: "Your units have +1 :rb_might:", "Other friendly units have +1 :rb_might: here.",
 // "Your Mechs have +1 :rb_might:", "Your token units have +1", battlefields "Units here have +1".
@@ -545,9 +549,65 @@ const LEGEND_FX = {
   'Lux, Lady of Luminosity': { playSpell: [{ who: 'self', kind: 'draw', n: 1, cond: 'cost5' }] },
   'Nasus, Curator of the Sands': { playUnit: [LMAY('Épuiser Nasus pour redresser 2 runes ?', [{ who: 'self', kind: 'readyRunes', n: 2 }], { cond: 'cost7' })] },
   'Volibear, Relentless Storm': { playUnit: [LMAY('Épuiser Volibear pour canaliser 1 rune épuisée ?', [{ who: 'self', kind: 'channel', n: 1, ex: true }], { cond: 'mightyPlayed' })] },
-  "Evelynn, Agony's Embrace": { playHidden: [{ who: 'self', kind: 'draw', n: 1, cond: 'oncePerTurn' }, { who: 'self', kind: 'discard', n: 1, cond: 'notMyTurn' }] },
+  "Evelynn, Agony's Embrace": { playHidden: [{ who: 'self', kind: 'seq', cond: 'oncePerTurn', fx: [{ who: 'self', kind: 'draw', n: 1 }, { who: 'self', kind: 'discard', n: 1, cond: 'notMyTurn' }] }] },
   'Leona, Radiant Dawn': { stunEnemy: [{ who: 'self', kind: 'buff' }] },
-  'Sivir, Battle Mistress': { enemyDies: [{ who: 'self', kind: 'readyLegend' }] },
+  'Sivir, Battle Mistress': { enemyDies: [{ who: 'self', kind: 'readyLegend' }],
+    recycleRune: [LMAY('Épuiser Sivir pour un jeton Gold épuisé ?', [{ who: 'self', kind: 'token', name: 'Gold', n: 1, ex: true }])] },
+  'Ivern, Green Father': { conquer: [LMAY('Épuiser Ivern pour remplacer ce champ de bataille par Brush ?', [{ who: 'self', kind: 'brush' }])],
+    hold: [LMAY('Épuiser Ivern pour remplacer ce champ de bataille par Brush ?', [{ who: 'self', kind: 'brush' }])] },
+  'Jarvan IV, Exemplar of Demacia': { playGear: [LMAY('Épuiser Jarvan et payer 1 puissance pour déplacer une unité alliée ?', [T('moveTo', { side: 'friendly' })], { pay: { e: 0, p: [null] }, cond: 'deployGear' })] },
+  'Fiora, Grand Duelist': { becomeMighty: [LMAY('Épuiser Fiora pour canaliser 1 rune épuisée ?', [{ who: 'self', kind: 'channel', n: 1, ex: true }])] },
+  'Jhin, Virtuoso': { playSpell: [{ who: 'self', kind: 'may', text: 'Bannir ce sort avec Jhin ? (4 sorts bannis : ils vont à la défausse, canaliser 4 runes, piocher 1)', cond: 'spent4', fx: [{ who: 'self', kind: 'jhinMark' }] }] },
+  'Sett, The Boss': { conquer: [{ who: 'self', kind: 'readyLegend', cond: 'legendEx' }] },
+  'Vi, Piltover Enforcer': { conquer: [LMAY('Épuiser Vi pour redresser une unité ?', [T('ready', { side: 'friendly' })], { cond: 'excess3' })] },
+  'Orianna, Lady of Clockwork': { mainStart: [{ who: 'self', kind: 'may', text: 'Payer 1 énergie pour animer un équipement (unité de force = son coût en énergie) ?', pay: { e: 1, p: [] }, cond: 'oriGear', fx: [T('animate', { gear: true, side: 'friendly' })] }] },
+  'Yordle, Heart of the Tempest': { playNotHand: [{ who: 'self', kind: 'empowerMe', cond: 'legendNotEmp' }] },
+  'Zed, Master of Shadows': { banishOwn: [{ who: 'self', kind: 'empowerMe', cond: 'legendNotEmp' }] },
+  'Ambessa, Matriarch of War': { empowerOther: [{ who: 'self', kind: 'empowerMe', cond: 'legendNotEmp' }] },
+  "Mel, Soul's Reflection": { empowerOther: [{ who: 'self', kind: 'empowerMe', cond: 'legendNotEmp' }] },
+};
+// Nasus / Dog: "a unit, gear, or activated ability with Energy cost 7 or more"
+LEGEND_FX['Nasus, Curator of the Sands'].playGear = LEGEND_FX['Nasus, Curator of the Sands'].activate = LEGEND_FX['Nasus, Curator of the Sands'].playUnit;
+LEGEND_FX['Dog, Curator of the Sands'] = LEGEND_FX['Nasus, Curator of the Sands'];
+LEGEND_FX['Irelia, Blade Dancer'].chooseFriendly = [LMAY('Épuiser Irelia et payer 1 puissance pour redresser cette unité ?', [{ who: 'self', kind: 'readyIid' }], { pay: { e: 0, p: [null] }, cond: 'iidEx' })];
+
+// Legends' activated abilities written by hand (Empower / Disempower costs, two choices, conditions).
+// needEmp / notEmp: only while (not) Empowered; disemp: "Disempower me" is part of the cost; useIf: a condition;
+// costLess: 'temporary' (Lillia: 1 Energy less per friendly unit with [Temporary]).
+const EC = (e, p = 0) => ({ e, p: Array(p).fill(null) });
+const LEGEND_AB = {
+  'Miss Fortune, Bounty Hunter': [{ text: 'Give a unit [Ganking] this turn.', cost: EC(0), fx: [T('kwTurn')] }],
+  'Shen, Eye of Twilight': [{ text: 'Give a friendly unit [Tank] this turn.', cost: EC(0), action: true, fx: [T('shield', { n: 0, tank: true, side: 'friendly' })] }],
+  'Yasuo, Unforgiven': [{ text: 'Move a friendly unit to or from its base.', cost: EC(2), fx: [T('moveTo', { side: 'friendly', to: 'toggle' })] }],
+  'Jax, Grandmaster at Arms': [
+    { text: 'Attach a detached Equipment you control to a unit you control.', cost: EC(1), fx: [T('mark', { gear: true, side: 'friendly', equip: 'detached' }), T('attachMark', { side: 'friendly' })] },
+    { text: 'Attach an attached Equipment you control to a unit you control.', cost: EC(0), fx: [T('mark', { gear: true, side: 'friendly', equip: 'attached' }), T('attachMark', { side: 'friendly' })] }],
+  "Kha'Zix, Voidreaver": [
+    { text: '[Buff] a unit.', cost: EC(0), xp: 1, fx: [{ who: 'self', kind: 'buff' }] },
+    { text: 'Move an exhausted friendly unit from a battlefield to its base.', cost: EC(0), xp: 2, fx: [T('moveTo', { side: 'friendly', where: 'bf', exOnly: true, to: 'base' })] }],
+  "K'Sante, Pride of Nazumah": [{ text: 'Give a friendly unit [Assault] equal to its [Shield] this turn.', cost: EC(1), fx: [T('assault', { n: 'shield', side: 'friendly' })] }],
+  'Teemo, Swift Scout': [{ text: 'Put a Teemo unit you own into your hand from your Champion Zone or the board.', cost: EC(1), fx: [{ who: 'self', kind: 'teemoHome' }] }],
+  'Yordle, Heart of the Tempest': [{ text: 'Give a unit [Assault 2] this turn.', cost: EC(0), action: true, disemp: true, fx: [T('assault', { n: 2 })] }],
+  // shortcut: the Bomb goes to base ([Deploy] gear on battlefields isn't modelled), its death effect is manual
+  'Yordle, Hexplosives Expert': [{ text: 'Play a Bomb gear token.', cost: EC(1, 1), fx: [{ who: 'self', kind: 'token', name: 'Bomb', n: 1 }] }],
+  'Akali, Rogue Assassin': [{ text: "If it's your turn, move a friendly unit in a showdown to base and if I'm [Empowered], ready it.", cost: EC(0), action: true, useIf: 'myTurn', fx: [T('moveTo', { side: 'friendly', where: 'combat', to: 'base', readyIfEmp: true })] }],
+  'Ekko, Boy Who Shattered Time': [
+    { text: 'Empower me.', cost: EC(1), notEmp: true, fx: [{ who: 'self', kind: 'empowerMe' }] },
+    { text: 'Reduce the cost of the next unit you play this turn by 2 Energy and 1 Power and give it "Kill me at end of turn."', cost: EC(0), disemp: true, fx: [{ who: 'self', kind: 'unitDisc', e: 2, p: 1 }] }],
+  'Jayce, Defender of Tomorrow': [
+    { text: 'Ready a gear.', cost: EC(1), fx: [T('ready', { gear: true, side: 'friendly' })] },
+    { text: 'Ready 2 gear.', cost: EC(1), needEmp: true, fx: [T('ready', { gear: true, side: 'friendly' }), T('ready', { gear: true, side: 'friendly', distinct: true })] }],
+  'Pyke, Bloodharbor Ripper': [{ text: "Return a friendly unit at a battlefield to its owner's hand. Play a Gold gear token exhausted.", cost: EC(1), fx: [T('hand', { side: 'friendly', where: 'bf' }), { who: 'self', kind: 'token', name: 'Gold', n: 1, ex: true }] }],
+  'Azir, Emperor of the Sands': [{ text: "Play a 2 Might Sand Soldier unit token to your base. Use only if you've played an Equipment this turn.", cost: EC(1), useIf: 'playedEquip', fx: [{ who: 'self', kind: 'token', name: 'Sand Soldier', n: 1, wm: true }] }],
+};
+// parsed abilities that only need a flag
+const AB_FLAGS = {
+  'Lillia, Bashful Bloom': [{ costLess: 'temporary' }],
+  'Darius, Hand of Noxus': [{ useIf: 'playedCard' }],
+  'Ezreal, Prodigal Explorer': [{ useIf: 'chose2' }],
+  "Mel, Soul's Reflection": [{ disemp: true, other: false }],
+  'Ambessa, Matriarch of War': [{ disemp: true, other: false }],
+  'Zed, Master of Shadows': [{ disemp: true, other: false }],
 };
 
 // "You may pay <cost> as an additional cost to play me"

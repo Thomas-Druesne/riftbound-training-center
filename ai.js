@@ -588,7 +588,7 @@ function phaseEquip(s, me, level) {
   const z = s.players[me].zones, acts = [], pool = runePool(s, me);
   const units = [...z.base, ...s.bfs.flatMap(b => b.units[me])].filter(c => isUnit(s, c)).sort((a, b) => (a.ex - b.ex) || G.hp(s, b) - G.hp(s, a));
   if (!units.length) return acts;
-  for (const g of z.base.filter(c => !c.att && R.kw(G.cd(s, c).text).equip)) {
+  for (const g of z.base.filter(c => !c.att && !c.anim && R.kw(G.cd(s, c).text).equip)) {
     const plan = R.planCost(pool, null, R.kwCost(G.cd(s, g).text, 'Equip') || { e: 0, p: [] });
     if (!plan) continue;
     spend(pool, plan);
@@ -617,7 +617,7 @@ function myAbilities(s, me, filter) {
     for (const ab of R.abilities(d)) {
       if (!ab.fx.length || ab.other || (ab.level && (pl.xp || 0) < ab.level) || (ab.xp && (pl.xp || 0) < ab.xp)) continue;
       if (ab.fx.some(e => e.kind === 'add')) continue; // mana abilities: not planned
-      if (!R.planCost(G.runesOf(s, me), pl.pool, ab.cost)) continue;
+      if (G.abilityBlocked(s, me, c, ab) || !R.planCost(G.runesOf(s, me), pl.pool, G.abilityCost(s, me, ab))) continue;
       if (filter && !filter(ab)) continue;
       out.push({ c, ab, d: { type: 'Spell', name: d.name + '@' + ab.i, text: ab.text }, owner: d });
     }

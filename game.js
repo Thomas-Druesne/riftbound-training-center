@@ -33,7 +33,13 @@ const other = p => (p === 'p1' ? 'p2' : 'p1');
 
 function mk(s, cid, owner) { return { iid: 'c' + ++s.iid, cid, owner, ex: false, dmg: 0, buff: 0, tb: 0, st: false, fd: false, rev: false }; }
 
-const cd = (s, c) => (s.cd && s.cd[c.cid]) || {};
+const animCache = new Map();
+const cd = (s, c) => {
+  const d = (s.cd && s.cd[c.cid]) || {};
+  if (!c.anim || d.type !== 'Gear') return d;
+  if (!animCache.has(d)) animCache.set(d, { ...d, type: 'Unit', might: d.energy || 0 });
+  return animCache.get(d);
+};
 // effective might of a unit; role 'a' attacker (Assault), 'd' defender (Shield)
 // equipment attached to a unit (gear stays listed in its controller's base, with att = unit iid)
 const gearOn = (s, c) => SEATS.flatMap(p => s.players[p].zones.base.filter(g => g.att === c.iid && cd(s, g).type === 'Gear'));
@@ -132,9 +138,15 @@ function syncCtrl(s) {
   }
 }
 function kill(s, f) {
+  if (f.arr) { f.i = f.arr.indexOf(f.c); if (f.i < 0) return; } // f may be stale (earlier deaths in the same effect)
   if (f.c.retreat === s.turn && cd(s, f.c).type === 'Unit' && f.p) {
     f.arr.splice(f.i, 1); detach(s, f.c); Object.assign(f.c, { dmg: 0, ex: true, retreat: null }); s.players[f.p].zones.base.push(f.c);
     log(s, `${name(s, f.c)} échappe à la mort : soigné, épuisé et rappelé à la base (Tactical Retreat).`); return;
+  }
+  const L = f.p && ['bf', 'base'].includes(f.zone) && cd(s, f.c).type === 'Unit' && f.c.buff > 0 && legendOf(s, f.p);
+  if (L && !L.ex && cd(s, L).name === 'Sett, The Boss' && auto(s, f.p) && pay(s, f.p, { e: 0, p: [null] })) {
+    L.ex = true; f.arr.splice(f.i, 1); Object.assign(f.c, { buff: 0, dmg: 0, ex: true }); s.players[f.p].zones.base.push(f.c);
+    log(s, `${name(s, f.c)} dépense son buff et est rappelé épuisé au lieu de mourir (Sett).`); return;
   }
   f.arr.splice(f.i, 1);
   detach(s, f.c);
@@ -164,7 +176,7 @@ function legendTrigger(s, p, ev, ctx = {}) {
   const L = legendOf(s, p); if (!L) return;
   const d = cd(s, L), fx = ((R.LEGEND_FX || {})[d.name] || {})[ev];
   if (!fx || !fx.length) return;
-  const q = fx.map(e => ({ ...e, by: p, card: d.name, src: L.iid, bfAt: ctx.bf, ctxCost: ctx.cost, ctxMighty: ctx.mighty }));
+  const q = fx.map(e => ({ ...e, by: p, card: d.name, src: L.iid, bfAt: ctx.bf, ctxCost: ctx.cost, ctxMighty: ctx.mighty, ctxIid: ctx.iid, ctxDeploy: ctx.deploy, ctxSpent: ctx.spent }));
   const could = e => (!e.exMe || !L.ex) && (!e.cond || e.cond === 'oncePerTurn' || mayCond(s, p, e));
   if (!q.some(could)) return; // nothing would happen: no log line
   if (!auto(s, p)) { log(s, `↳ ${d.name} (légende) : « ${d.text} » À appliquer à la main.`); return; }
@@ -201,6 +213,16 @@ function mayCond(s, p, e) {
     case 'xp6': return (s.players[p].xp || 0) >= 6;
     case 'showHidden': return s.players[p].zones.hand.some(c => R.kw(cd(s, c).text).hidden);
     case 'hasGear': return s.players[p].zones.base.some(g => cd(s, g).type === 'Gear' && /\[Equip\]/.test(cd(s, g).text || ''));
+    case 'myTurn': return s.active === p;
+    case 'playedCard': return ((s.played || {})[p] || 0) > 0;
+    case 'playedEquip': return (s.playedEq || {})[p] === s.turn;
+    case 'chose2': { const k = (s.chose || {})[p]; return !!k && k.turn === s.turn && k.n >= 2; }
+    case 'excess3': { const x = s.excess; return !!x && x.turn === s.turn && x.p === p && x.bf === e.bfAt && x.n >= 3; }
+    case 'deployGear': return !!e.ctxDeploy;
+    case 'spent4': return (e.ctxSpent || 0) >= 4;
+    case 'iidEx': { const f = e.ctxIid && find(s, e.ctxIid); return !!f && ['base', 'bf'].includes(f.zone) && f.c.ex; }
+    case 'legendNotEmp': { const L = legendOf(s, p); return !!L && !L.emp; }
+    case 'oriGear': { const all = [...s.players[p].zones.base, ...s.bfs.flatMap(b => b.units[p])]; return !all.some(c => c.anim) && s.players[p].zones.base.some(g => cd(s, g).type === 'Gear' && !isToken(s, g)); }
     default: return true;
   }
 }
@@ -278,7 +300,8 @@ function nextShowdown(s) {
 function resolveTop(s) {
   const c = s.chain.pop(), cb = c.cb, d = cd(s, c), p = cb.by;
   delete c.cb;
-  if (cb.flow || /Banish this\./.test(d.text || '')) s.players[c.owner].zones.banish.unshift(c);
+  if (cb.jhin) jhinBanish(s, c);
+  else if (cb.flow || /Banish this\./.test(d.text || '')) { s.players[c.owner].zones.banish.unshift(c); legendTrigger(s, c.owner, 'banishOwn'); }
   else if (cb.recycle) s.players[c.owner].zones.main.push(c); else toTrash(s, c);
   log(s, `${d.name} (${seatName(s, p)}) se résout.`);
   let fx = R.playFx(d, { legion: cb.legion, xp: s.players[p].xp || 0 });
@@ -292,6 +315,39 @@ function resolveTop(s) {
   // stack empty during a showdown: Focus goes to the other player (rule 346)
   if (!s.chain.length && s.showdown) { s.showdown.focus = other(s.showdown.last || p); s.showdown.passes = 0; }
   return null;
+}
+// Jhin: spells banished with him; at four, they go to the trash, channel 4 runes and draw 1
+function jhinBanish(s, c) {
+  const p = c.owner, z = s.players[p].zones;
+  c.jhin = true; z.banish.unshift(c);
+  legendTrigger(s, p, 'banishOwn');
+  const js = z.banish.filter(x => x.jhin);
+  if (js.length < 4) return log(s, `${name(s, c)} est banni avec Jhin (${js.length}/4).`);
+  z.banish = z.banish.filter(x => !x.jhin);
+  for (const x of js) { delete x.jhin; toTrash(s, x); }
+  const k = channel(s, p, 4), n = draw(s, p, 1);
+  log(s, `Jhin : 4 sorts bannis vont à la défausse, ${seatName(s, p)} canalise ${k} runes et pioche ${n}.`);
+}
+// can p use this activated ability now (Empower state, "use only if")? an error text, or null
+function abilityBlocked(s, p, c, ab) {
+  if ((ab.needEmp || ab.disemp) && !c.emp) return 'Il faut être Empowered.';
+  if (ab.notEmp && c.emp) return 'Déjà Empowered.';
+  if (ab.useIf && !mayCond(s, p, { cond: ab.useIf })) return ({ playedEquip: 'Utilisable seulement si vous avez joué un équipement ce tour.', playedCard: 'Legion : jouez d’abord une carte ce tour.', chose2: 'Utilisable après avoir choisi deux fois des unités ou équipements ennemis ce tour.', myTurn: 'Utilisable seulement pendant votre tour.' })[ab.useIf] || 'Condition non remplie.';
+  return null;
+}
+function abilityCost(s, p, ab) {
+  if (ab.costLess !== 'temporary') return ab.cost;
+  const n = unitsOf(s, p).filter(u => u.tmpT || R.kw(cd(s, u).text).temporary).length;
+  return { ...ab.cost, e: Math.max(0, ab.cost.e - n) };
+}
+// Fiora: "when one of your units becomes [Mighty]"
+function mightyWatch(s) {
+  const was = s.mighty || (s.mighty = {});
+  for (const p of SEATS) {
+    const now = unitsOf(s, p).filter(c => hp(s, c) >= 5).map(c => c.iid), before = was[p];
+    was[p] = now;
+    if (before && now.some(id => !before.includes(id))) legendTrigger(s, p, 'becomeMighty');
+  }
 }
 // units of p at the location of the effect's source card ("here")
 function hereUnits(s, e, p) {
@@ -312,7 +368,10 @@ function runFxLoop(s) {
     if (e.cond && e.kind !== 'may' && !mayCond(s, to, e)) continue;
     if (e.kind === 'draw') { const n = draw(s, to, e.n + (e.per === 'bfCtrl' || e.per === 'bfCtrlOther' ? s.bfs.filter((b, i) => b.ctrl === to && !(e.per === 'bfCtrlOther' && i === e.bfAt)).length : e.per === 'mighty' ? unitsOf(s, to).filter(c => hp(s, c) >= 5).length : 0)); log(s, `${T} pioche ${n} (${e.card}).`); }
     else if (e.kind === 'reveal') { for (const c of s.players[to].zones.hand) c.rev = true; log(s, `${T} révèle sa main (${e.card}).`); }
-    else if (e.kind === 'token') makeTokens(s, to, e, e.here ? e.bfAt : null, e.card);
+    else if (e.kind === 'token') {
+      const n = makeTokens(s, to, e, e.here ? e.bfAt : null, e.card), tok = n && s.players[to].zones.base[s.players[to].zones.base.length - 1];
+      if (e.wm && tok) s.fxQueue.unshift({ who: 'self', kind: 'may', text: 'Équiper un de vos équipements au Sand Soldier (Weaponmaster) ?', cond: 'hasGear', fx: [{ who: 'self', kind: 'equipBest' }], by: e.by, card: e.card, src: tok.iid });
+    }
     else if (e.kind === 'counter') { // counter the spell just below on the stack
       const t = s.chain && s.chain[s.chain.length - 1];
       if (!t) continue;
@@ -402,6 +461,25 @@ function runFxLoop(s) {
       s.pending = { kind: 'pick', to, n: 1, by: e.by, card: e.card, cards, from: e.from, fx: e, opt: true, top: e.from === 'top' ? pool.map(c => c.iid) : null };
       log(s, `${T} choisit une carte ${e.from === 'top' ? `parmi les ${pool.length} du dessus de son deck` : 'dans sa défausse'} (${e.card}).`);
     }
+    else if (e.kind === 'seq') s.fxQueue.unshift(...e.fx.map(x => ({ ...x, by: e.by, card: e.card, src: e.src, bfAt: e.bfAt })));
+    else if (e.kind === 'readyIid') { const f = e.ctxIid && find(s, e.ctxIid); if (f && ['base', 'bf'].includes(f.zone)) { f.c.ex = false; log(s, `${name(s, f.c)} est redressé (${e.card}).`); } }
+    else if (e.kind === 'empowerMe') { const L = legendOf(s, to); if (L && !L.emp) { L.emp = true; log(s, `${name(s, L)} devient Empowered (${e.card}).`); } }
+    else if (e.kind === 'unitDisc') { s.unitDisc = { p: to, turn: s.turn, e: e.e, n: e.p }; log(s, `La prochaine unité de ${T} ce tour coûte ${e.e} énergie et ${e.p} puissance de moins, et sera détruite en fin de tour (${e.card}).`); }
+    else if (e.kind === 'teemoHome') {
+      const z = s.players[to].zones, isT = c => cd(s, c).type === 'Unit' && /Teemo/.test(cd(s, c).name || '') && c.owner === to;
+      const ch = z.champion.find(isT), u = !ch && SEATS.flatMap(q => unitsOf(s, q)).find(isT);
+      if (ch) { z.champion.splice(z.champion.indexOf(ch), 1); z.hand.push(ch); log(s, `${T} reprend ${name(s, ch)} en main (${e.card}).`); }
+      else if (u) applyTarget(s, { op: 'hand', card: e.card }, u.iid, to);
+      else log(s, `${e.card} : aucun Teemo à reprendre.`);
+    }
+    else if (e.kind === 'brush') { // Ivern: that battlefield becomes the Brush battlefield token
+      const b = e.bfAt != null && s.bfs[e.bfAt], cid = Object.keys(s.cd).find(id => s.cd[id].name === 'Brush' && s.cd[id].type === 'Battlefield');
+      if (!b || !cid) { log(s, `${e.card} : Brush indisponible.`); continue; }
+      const was = b.card ? name(s, b.card) : 'le champ de bataille';
+      b.prev = b.prev || b.card; b.card = mk(s, cid, to);
+      log(s, `${was} est remplacé par Brush (${e.card}).`);
+    }
+    else if (e.kind === 'jhinMark') { const t = (s.chain || []).find(x => x.iid === e.ctxIid); if (t) { t.cb.jhin = true; log(s, `${name(s, t)} sera banni avec Jhin.`); } }
     else if (e.kind === 'readyRunes') { let k = 0; for (const r of s.players[to].zones.runes) if (r.ex && k < e.n) { r.ex = false; k++; } if (k) log(s, `${T} redresse ${k} rune${k > 1 ? 's' : ''} (${e.card}).`); }
     else if (e.kind === 'reflectHere') { // LeBlanc: a ready Reflection copy of the best other unit there, with [Temporary]
       const at = e.bfAt != null ? s.bfs[e.bfAt].units[to] : null; if (!at) continue;
@@ -532,6 +610,8 @@ function candidates(s, p, e) {
     if (e.atBf && (e.bfAt == null || where !== 'bf' || bf !== e.bfAt)) return;
     if (e.crowd && (where !== 'bf' || s.bfs[bf].units.p1.length + s.bfs[bf].units.p2.length < e.crowd)) return;
     if (e.tag && !(d.tags || []).includes(e.tag)) return;
+    if (e.equip && (!/\[Equip\]/.test(d.text || '') || (e.equip === 'attached') !== !!c.att)) return;
+    if (e.exOnly && !c.ex) return;
     if (e.where === 'bf' && where !== 'bf') return;
     if (e.where === 'base' && where !== 'base') return;
     if (e.where === 'here' && (where !== 'bf' || (e.bfAt != null && bf !== e.bfAt))) return;
@@ -564,6 +644,8 @@ function applyTarget(s, e, iid, p) {
   }
   payDeflect(s, p, iid);
   const f = find(s, iid); if (!f) return;
+  if (e.src && f.p && f.p !== p) { const k = (s.chose || (s.chose = {}))[p]; s.chose[p] = { turn: s.turn, n: k && k.turn === s.turn ? k.n + 1 : 1 }; }
+  else if (e.src && f.p === p && cd(s, f.c).type === 'Unit' && !['kill', 'hand', 'deck'].includes(e.op)) legendTrigger(s, p, 'chooseFriendly', { iid: f.c.iid });
   const c = f.c, N = name(s, c), src = e.card ? ` (${e.card})` : '';
   if ((e.op === 'dmg' || e.op === 'dmgSplash') && s.noSpellDmg === s.turn) { log(s, `Dégâts prévenus (${e.card}).`); return; }
   if (e.op === 'dmg') { c.dmg = (c.dmg || 0) + e.n; log(s, `${N} subit ${e.n} dégât${e.n > 1 ? 's' : ''}${src}.`); }
@@ -573,10 +655,16 @@ function applyTarget(s, e, iid, p) {
   else if (e.op === 'might') { let n = e.perEnemy ? e.n * (f.zone === 'bf' ? s.bfs[f.bf].units[other(f.p)].length : 0) : e.alone && f.zone === 'bf' && s.bfs[f.bf].units[f.p].length === 1 ? e.n + e.alone : e.n;
     if (e.min != null) n = Math.max(n, Math.min(0, e.min - hp(s, c))); c.tb = (c.tb || 0) + n; e = { ...e, n }; log(s, `${N} gagne ${e.n > 0 ? '+' : ''}${e.n} force ce tour${src}.`); }
   else if (e.op === 'ready') { c.ex = false; log(s, `${N} est redressé${src}.`); }
-  else if (e.op === 'assault') { const n = e.n === 'might' ? hp(s, c) : e.n; c.ta = (c.ta || 0) + n; log(s, `${N} gagne [Assault ${n}] ce tour${src}.`); }
+  else if (e.op === 'assault') { const n = e.n === 'might' ? hp(s, c) : e.n === 'shield' ? (kwOf(s, c).shield || 0) + (c.ts || 0) : e.n; c.ta = (c.ta || 0) + n; log(s, `${N} gagne [Assault ${n}] ce tour${src}.`); }
   else if (e.op === 'shield') { c.ts = (c.ts || 0) + e.n; if (e.tank) c.tt = true; log(s, `${N} gagne [Shield ${e.n}]${e.tank ? ' et [Tank]' : ''} ce tour${src}.`); }
   else if (e.op === 'double') { const n = hp(s, c); c.tb = (c.tb || 0) + n; log(s, `La force de ${N} est doublée ce tour (+${n})${src}.`); }
   else if (e.op === 'mark') { s.fxMark = c.iid; return; }
+  else if (e.op === 'attachMark') { const g = s.fxMark && find(s, s.fxMark); s.fxMark = null; if (g && cd(s, g.c).type === 'Gear') { g.c.att = c.iid; log(s, `${name(s, g.c)} est attaché à ${N}${src}.`); } return; }
+  else if (e.op === 'animate') { // Orianna: the previous animated gear stops being a unit (back to base)
+    for (const q of SEATS) for (const b of s.bfs) for (const x of b.units[q].slice()) if (x.anim && x !== c) { b.units[q].splice(b.units[q].indexOf(x), 1); s.players[q].zones.base.push(x); }
+    for (const q of SEATS) for (const x of s.players[q].zones.base) if (x !== c) delete x.anim;
+    c.anim = true; c.att = null; log(s, `${N} devient une unité de force ${cd(s, c).might}${src}.`); syncCtrl(s); return;
+  }
   else if (e.op === 'duelSelf') { const o = e.src && find(s, e.src); if (o && ['base', 'bf'].includes(o.zone)) duel(s, o, f); return; }
   else if (e.op === 'stunOrKill') { if (c.st) { kill(s, f); syncCtrl(s); return; } c.st = true; log(s, `${N} est étourdi${src}.`); }
   else if (e.op === 'duel') { const o = s.fxMark && find(s, s.fxMark); s.fxMark = null; if (o) duel(s, o, f); return; }
@@ -634,8 +722,8 @@ function applyTarget(s, e, iid, p) {
   else if (e.op === 'blink' || e.op === 'moveTo') {
     if (e.to === 'here' && (e.bfAt == null || !s.bfs[e.bfAt])) return;
     if (e.markMoved) s.fxMark = c.iid;
-    const loc = e.to === 'here' ? e.bfAt : e.to === 'base' ? 'base' : e.to === 'same' ? (f.zone === 'bf' ? f.bf : 'base') : e.preBf != null && s.bfs[e.preBf] ? e.preBf : s.bfs.length === 1 ? 0 : null;
-    if (loc != null) { placeUnit(s, c.iid, loc, e); return; }
+    const loc = e.to === 'toggle' && f.zone === 'bf' ? 'base' : e.to === 'here' ? e.bfAt : e.to === 'base' ? 'base' : e.to === 'same' ? (f.zone === 'bf' ? f.bf : 'base') : e.preBf != null && s.bfs[e.preBf] ? e.preBf : s.bfs.length === 1 ? 0 : null;
+    if (loc != null) { placeUnit(s, c.iid, loc, e); if (e.readyIfEmp && (legendOf(s, p) || {}).emp) { c.ex = false; log(s, `${N} est redressé${src}.`); } return; }
     s.pending = { kind: 'bf', to: p, n: 1, by: e.by, card: e.card, fx: { ...e, unit: c.iid }, opts: s.bfs.map((b, i) => i) };
     log(s, `${seatName(s, p)} choisit le champ de bataille de ${N} (${e.card}).`);
     return;
@@ -759,6 +847,7 @@ function pay(s, p, cost) {
   for (const id of plan.rc) { const i = rz.runes.findIndex(r => r.iid === id); const [r] = rz.runes.splice(i, 1); r.ex = false; rz.runeDeck.push(r); }
   pool.e -= plan.usedE;
   pool.p = pool.p.filter((_, i) => !plan.usedP.includes(i));
+  if (plan.rc.length) legendTrigger(s, p, 'recycleRune');
   return { e: plan.ex.length + plan.usedE, p: plan.rc.length + plan.usedP.length };
 }
 const costText = c => `${c.e} énergie${c.p.length ? ` + ${c.p.length} puissance ${[...new Set(c.p.map(x => (x ? x.join('/') : 'au choix')))].join(', ')}` : ''}`;
@@ -920,6 +1009,7 @@ function startTurn(s, p) {
     log(s, `— Tour ${s.turn} · ${W} : à vous de redresser, ${held ? `marquer ${held} point${held > 1 ? 's' : ''} (tenir), ` : ''}canaliser ${second ? 3 : 2} runes et piocher 1 carte.`);
     s.started = s.turn;
     s.bfs.forEach((b, i) => { if (b.ctrl === p) { for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); bfTrigger(s, i, 'hold', p); legendTrigger(s, p, 'hold', { bf: i }); } });
+    legendTrigger(s, p, 'mainStart');
     return;
   }
   readyAll(s, p);
@@ -938,6 +1028,7 @@ function startTurn(s, p) {
   s.started = s.turn;
   s.bfs.forEach((b, i) => { if (b.ctrl === p) { for (const c of b.units[p].slice()) trigger(s, c, 'hold', p, i); bfTrigger(s, i, 'hold', p); legendTrigger(s, p, 'hold', { bf: i }); } });
   winCheck(s, p);
+  legendTrigger(s, p, 'mainStart');
 }
 
 // pre-game actions (no undo)
@@ -1069,8 +1160,118 @@ function apply(s, a) {
   snapshot(s, who);
   const err = act(s, a, who);
   if (err) s.history.pop();
-  else s.rev++;
+  else { mightyWatch(s); s.rev++; }
   return err;
+}
+
+// Play a card: from hand / champion zone / hiding (the 'play' action), or by an effect (opt.fx: from the deck or the
+// trash, any timing; opt.free: no Energy cost, opt.powerOnly: still pay its Power). Returns an error text or null.
+function playCard(s, who, a, opt = {}) {
+  const f = find(s, a.iid);
+  const flow = a.flow && f && f.zone === 'trash';
+  if (!f || !(['hand', 'champion', 'hidden'].includes(f.zone) || flow || (opt.fx && ['main', 'trash'].includes(f.zone)))) return 'carte introuvable';
+  const d = cd(s, f.c), p = f.zone === 'hidden' ? f.c.owner : opt.fx ? who : f.p, c = f.c;
+  if (d.type === 'Rune' || d.type === 'Battlefield' || d.type === 'Legend') return 'Cette carte ne se joue pas ainsi';
+  if (p !== who) return 'Ce n’est pas votre carte';
+  const k = R.kw(d.text), fromHidden = f.zone === 'hidden', ai = auto(s, p);
+  if (fromHidden && s.turn <= (c.hidT || 0)) return 'Une carte cachée se joue à partir du tour suivant.';
+  // timing (rules 155, 806, 813): on the opponent's turn only [Reaction] / [Action] cards,
+  // cards played from hiding (they gain Reaction), or Ambush units played to a battlefield where you have units.
+  // During a showdown only Action / Reaction cards; on a pending stack only Reactions.
+  let toBf = a.to && a.to.bf != null ? a.to.bf : fromHidden ? f.bf : null;
+  const quick = k.reaction || fromHidden || (k.ambush && toBf != null && d.type === 'Unit');
+  if (!opt.fx && who !== s.active && !(quick || (k.action && s.showdown)))
+    return `Ce n’est pas votre tour : seules les cartes [Reaction] ou [Action] se jouent pendant le tour adverse.`;
+  if (!opt.fx && s.chain && s.chain.length && !quick) return 'Une carte est sur la pile : seules les cartes [Reaction] peuvent y répondre.';
+  if (!opt.fx && s.showdown && !(quick || k.action)) return 'Affrontement en cours : seules les cartes [Action] ou [Reaction] se jouent.';
+  // location (rule 355.2): units go to your base or a battlefield you control; Ambush adds battlefields
+  // where you have units; a card played from hiding stays at its battlefield
+  if (toBf != null && d.type === 'Unit') {
+    const bf = s.bfs[toBf];
+    if (!bf) return 'champ de bataille inconnu';
+    if (bfName(s, toBf) === 'Rockfall Path') return 'Rockfall Path : aucune unité ne peut y être jouée.';
+    if (fromHidden && toBf !== f.bf) return 'Une unité jouée depuis une carte cachée arrive sur ce champ de bataille.';
+    if (!fromHidden && bf.ctrl !== p && !(k.ambush && bf.units[p].length) && !(k.toEnemyBf && bf.units[other(p)].length))
+      return k.toEnemyBf ? `${d.name} se joue sur un champ de bataille où il y a des unités ennemies, où vous avez des unités, ou que vous contrôlez.` : k.ambush ? 'Embuscade : il faut contrôler ce champ de bataille ou y avoir déjà une unité.' : `${d.name} se joue dans votre base ou sur un champ de bataille que vous contrôlez (Embuscade/Ambush permet d’aller là où vous avez des unités).`;
+  }
+  const pl = s.players[p], legion = (s.played && s.played[p]) > 0;
+  let paid = null, accel = false, repeat = null, paidExtra = !ai && !!a.extra;
+  const ud = !opt.free && d.type === 'Unit' && s.unitDisc && s.unitDisc.p === p && s.unitDisc.turn === s.turn ? s.unitDisc : null; // Ekko
+  if (ai) { // cost: printed (ignored from hiding), Flow replaces it, discounts, + Accelerate / Repeat
+    let base = opt.free ? { e: 0, p: opt.powerOnly ? R.cardCost(d).p : [] } : fromHidden ? { e: 0, p: [] } : flow ? R.kwCost(d.text, 'Flow') : R.cardCost(d);
+    if (!base) return 'Cette carte n’a pas de coût Flow';
+    const disc = !opt.free && !fromHidden && !flow && discount(s, p, d, legion);
+    if (disc) {
+      const left = base.p.slice();
+      for (const x of disc.p) { const i = left.findIndex(set => !x || !set || set.some(dm => x.includes(dm))); if (i >= 0) left.splice(i, 1); }
+      base = { e: Math.max(Math.min(base.e, disc.min), base.e - disc.e), p: left };
+    }
+    repeat = a.repeat ? R.kwCost(d.text, 'Repeat') : null;
+    accel = k.accelerate && d.type === 'Unit' && a.accel !== false;
+    const plan = cost => R.planCost(runesOf(s, p), pl.pool || (pl.pool = newPool()), cost);
+    let cost = R.sumCost(base, repeat, accel ? R.cardCost({ ...d, energy: 0, power: 0 }, true) : null);
+    if (accel && !plan(cost)) { accel = false; cost = R.sumCost(base, repeat); }
+    if (ud) cost = { e: Math.max(0, cost.e - ud.e), p: cost.p.slice(ud.n) };
+    const L = legendOf(s, p), sera = L && !L.ex && cd(s, L).name === 'Seraphine, Starry-Eyed Songstress' && d.type === 'Spell' && unitsOf(s, p).filter(u => !u.ex);
+    if (sera && sera.length >= 3 && cost.e > 0 && !plan(cost) && plan({ ...cost, e: Math.max(0, cost.e - 2) })) {
+      L.ex = true; sera.sort((x, y) => hp(s, x) - hp(s, y)).slice(0, 3).forEach(u => (u.ex = true)); cost = { ...cost, e: Math.max(0, cost.e - 2) };
+      log(s, `Seraphine : ${seatName(s, p)} épuise sa légende et 3 unités, ${d.name} coûte 2 énergie de moins.`);
+    }
+    if (!opt.free && d.type === 'Spell' && s.spellDisc && s.spellDisc.p === p && s.spellDisc.turn === s.turn) { cost = { ...cost, e: Math.max(0, cost.e - s.spellDisc.n) }; delete s.spellDisc; }
+    if (!plan(cost)) return `Pas assez de runes pour jouer ${d.name} (${costText(cost)}).`;
+    const xc = R.extraCost(d.text); // "you may pay ... as an additional cost": paid when it can be, unless declined
+    if (xc && a.extra !== false && plan(R.sumCost(cost, xc))) { cost = R.sumCost(cost, xc); paidExtra = true; }
+    paid = pay(s, p, cost);
+  }
+  (s.played || (s.played = { p1: 0, p2: 0 }))[p]++;
+  if (ud) { delete s.unitDisc; c.killEnd = s.turn; }
+  if (d.type === 'Gear' && /\[Equip\]/.test(d.text || '')) (s.playedEq || (s.playedEq = {}))[p] = s.turn;
+  f.arr.splice(f.i, 1);
+  c.rev = false; c.fd = false;
+  const how = `${opt.how || ''}${fromHidden ? ' (depuis sa carte cachée)' : flow ? ' depuis sa défausse (Flow)' : ''}${paid && (paid.e || paid.p) ? ` (${paid.e} énergie${paid.p ? `, ${paid.p} puissance` : ''})` : ''}${accel ? ', accéléré' : ''}${repeat ? ', avec Repeat' : ''}`;
+  if (s.showdown) { s.showdown.passes = 0; s.showdown.fresh = false; s.showdown.last = p; }
+  if (d.type === 'Spell') {
+    // spells go on the stack: the opponent may respond with Reactions before it resolves
+    const tg = (Array.isArray(a.targets) ? a.targets : []).filter(id => typeof id === 'string' && find(s, id)).slice(0, 4);
+    c.cb = { by: p, seen: false, flow: !!flow, recycle: !!opt.recycle, repeat: !!repeat, legion, targets: tg, bf: a.bf, fx: R.playFx(d, { legion, xp: pl.xp || 0 }).length > 0 };
+    (s.chain || (s.chain = [])).push(c);
+    log(s, `✦ ${seatName(s, p)} lance ${d.name}${how}. ${s.chain.length > 1 ? 'En réponse sur la pile.' : 'Sur la pile : l’adversaire peut réagir.'}`);
+    for (const u of mineOnBoard(s, p)) trigger(s, u, 'playSpell', p, null);
+    legendTrigger(s, p, 'playSpell', { cost: d.energy || 0, spent: paid ? paid.e : 0, iid: c.iid });
+    if (fromHidden) legendTrigger(s, p, 'playHidden');
+    if (opt.fx) legendTrigger(s, p, 'playNotHand');
+    return null;
+  }
+  // units enter exhausted unless Accelerate was paid or the card says "I enter ready"; gear enters ready at base
+  // Baron Nashor: "As you play me, add the Baron Pit battlefield token to the board if it's not there already. If you do, I enter there."
+  if (d.type === 'Unit' && /add the Baron Pit battlefield token/i.test(d.text || '') && !s.bfs.some((b, i) => bfName(s, i) === 'Baron Pit')) {
+    const pit = Object.keys(s.cd).find(id => s.cd[id].name === 'Baron Pit' && s.cd[id].type === 'Battlefield');
+    if (pit) { s.bfs.push({ card: mk(s, pit, p), units: { p1: [], p2: [] }, ctrl: null, hidden: [] }); toBf = s.bfs.length - 1; log(s, `${d.name} ajoute le champ de bataille Baron Pit et y entre.`); }
+  }
+  c.ex = d.type === 'Unit' ? !(accel || R.entersReady(d)) : false;
+  (toBf != null && d.type === 'Unit' ? s.bfs[toBf].units[p] : pl.zones.base).push(c);
+  log(s, `✦ ${seatName(s, p)} joue ${d.name}${how}.`);
+  if (toBf != null && d.type === 'Unit') arrive(s, toBf, p);
+  if (s.showdown && s.showdown.last === p) s.showdown.focus = other(p);
+  if (d.type === 'Unit') for (const u of mineOnBoard(s, p)) if (u !== c) trigger(s, u, 'playUnit', p, null);
+  if (d.type === 'Unit') legendTrigger(s, p, 'playUnit', { cost: d.energy || 0, mighty: hp(s, c) >= 5 });
+  if (d.type === 'Gear') legendTrigger(s, p, 'playGear', { cost: d.energy || 0, deploy: /\[Deploy\]/.test(d.text || '') });
+  if (d.type === 'Unit' && legendOf(s, p) && cd(s, legendOf(s, p)).name === 'Master Yi, Wuju Master' && (pl.xp || 0) >= 11) c.ex = false;
+  if (fromHidden) legendTrigger(s, p, 'playHidden');
+  if (opt.fx || fromHidden || f.zone === 'champion' || flow) legendTrigger(s, p, 'playNotHand');
+  // Riven, The Exile: units played to battlefields you control enter ready
+  if (d.type === 'Unit' && toBf != null && s.bfs[toBf].ctrl === p && legendOf(s, p) && cd(s, legendOf(s, p)).name === 'Riven, The Exile') c.ex = false;
+  // play effects: everything for the AI (a.targets / a.bf pre-select its choices); for a human, only
+  // what the opponent must decide or reveal (discard, kill one of their units, reveal their hand)
+  const bfAt = toBf != null && (d.type === 'Unit' || fromHidden) ? toBf : null;
+  let fx = R.playFx(d, { legion, xp: pl.xp || 0 });
+  if (d.type === 'Unit' && R.kw(d.text).weaponmaster) fx = [...fx, { who: 'self', kind: 'may', text: 'Équiper un de vos équipements à cette unité (Weaponmaster) ?', cond: 'hasGear', fx: [{ who: 'self', kind: 'equipBest' }] }];
+  if (k.quickDraw && d.type === 'Gear') fx = [{ kind: 'target', op: 'attach', side: 'friendly', where: 'any', who: 'self' }, ...fx];
+  (s.fxPre || (s.fxPre = {}))[c.iid] = (a.targets || []).slice();
+  if ((a.targets || []).length) (s.fxDeclared || (s.fxDeclared = {}))[c.iid] = true;
+  s.fxQueue = [...(s.fxQueue || []), ...fx.map(e => ({ ...e, by: p, card: d.name, src: c.iid, bfAt, preBf: a.bf, fromHidden, legion, paidExtra }))];
+  runFx(s);
+  return null;
 }
 
 function act(s, a, who) {
@@ -1126,100 +1327,7 @@ function act(s, a, who) {
       }
       return null;
     }
-    case 'play': { // AI: pays and resolves its effects automatically. Human: no payment, effects done by hand.
-      const f = find(s, a.iid);
-      const flow = a.flow && f && f.zone === 'trash';
-      if (!f || !(['hand', 'champion', 'hidden'].includes(f.zone) || flow)) return 'carte introuvable';
-      const d = cd(s, f.c), p = f.zone === 'hidden' ? f.c.owner : f.p, c = f.c;
-      if (d.type === 'Rune' || d.type === 'Battlefield' || d.type === 'Legend') return 'Cette carte ne se joue pas ainsi';
-      if (p !== who) return 'Ce n’est pas votre carte';
-      const k = R.kw(d.text), fromHidden = f.zone === 'hidden', ai = auto(s, p);
-      if (fromHidden && s.turn <= (c.hidT || 0)) return 'Une carte cachée se joue à partir du tour suivant.';
-      // timing (rules 155, 806, 813): on the opponent's turn only [Reaction] / [Action] cards,
-      // cards played from hiding (they gain Reaction), or Ambush units played to a battlefield where you have units.
-      // During a showdown only Action / Reaction cards; on a pending stack only Reactions.
-      let toBf = a.to && a.to.bf != null ? a.to.bf : fromHidden ? f.bf : null;
-      const quick = k.reaction || fromHidden || (k.ambush && toBf != null && d.type === 'Unit');
-      if (who !== s.active && !(quick || (k.action && s.showdown)))
-        return `Ce n’est pas votre tour : seules les cartes [Reaction] ou [Action] se jouent pendant le tour adverse.`;
-      if (s.chain && s.chain.length && !quick) return 'Une carte est sur la pile : seules les cartes [Reaction] peuvent y répondre.';
-      if (s.showdown && !(quick || k.action)) return 'Affrontement en cours : seules les cartes [Action] ou [Reaction] se jouent.';
-      // location (rule 355.2): units go to your base or a battlefield you control; Ambush adds battlefields
-      // where you have units; a card played from hiding stays at its battlefield
-      if (toBf != null && d.type === 'Unit') {
-        const bf = s.bfs[toBf];
-        if (!bf) return 'champ de bataille inconnu';
-        if (bfName(s, toBf) === 'Rockfall Path') return 'Rockfall Path : aucune unité ne peut y être jouée.';
-        if (fromHidden && toBf !== f.bf) return 'Une unité jouée depuis une carte cachée arrive sur ce champ de bataille.';
-        if (!fromHidden && bf.ctrl !== p && !(k.ambush && bf.units[p].length) && !(k.toEnemyBf && bf.units[other(p)].length))
-          return k.toEnemyBf ? `${d.name} se joue sur un champ de bataille où il y a des unités ennemies, où vous avez des unités, ou que vous contrôlez.` : k.ambush ? 'Embuscade : il faut contrôler ce champ de bataille ou y avoir déjà une unité.' : `${d.name} se joue dans votre base ou sur un champ de bataille que vous contrôlez (Embuscade/Ambush permet d’aller là où vous avez des unités).`;
-      }
-      const pl = s.players[p], legion = (s.played && s.played[p]) > 0;
-      let paid = null, accel = false, repeat = null, paidExtra = !ai && !!a.extra;
-      if (ai) { // cost: printed (ignored from hiding), Flow replaces it, discounts, + Accelerate / Repeat
-        let base = fromHidden ? { e: 0, p: [] } : flow ? R.kwCost(d.text, 'Flow') : R.cardCost(d);
-        if (!base) return 'Cette carte n’a pas de coût Flow';
-        const disc = !fromHidden && !flow && discount(s, p, d, legion);
-        if (disc) {
-          const left = base.p.slice();
-          for (const x of disc.p) { const i = left.findIndex(set => !x || !set || set.some(dm => x.includes(dm))); if (i >= 0) left.splice(i, 1); }
-          base = { e: Math.max(Math.min(base.e, disc.min), base.e - disc.e), p: left };
-        }
-        repeat = a.repeat ? R.kwCost(d.text, 'Repeat') : null;
-        accel = k.accelerate && d.type === 'Unit' && a.accel !== false;
-        const plan = cost => R.planCost(runesOf(s, p), pl.pool || (pl.pool = newPool()), cost);
-        let cost = R.sumCost(base, repeat, accel ? R.cardCost({ ...d, energy: 0, power: 0 }, true) : null);
-        if (accel && !plan(cost)) { accel = false; cost = R.sumCost(base, repeat); }
-        if (d.type === 'Spell' && s.spellDisc && s.spellDisc.p === p && s.spellDisc.turn === s.turn) { cost = { ...cost, e: Math.max(0, cost.e - s.spellDisc.n) }; delete s.spellDisc; }
-        if (!plan(cost)) return `Pas assez de runes pour jouer ${d.name} (${costText(cost)}).`;
-        const xc = R.extraCost(d.text); // "you may pay ... as an additional cost": paid when it can be, unless declined
-        if (xc && a.extra !== false && plan(R.sumCost(cost, xc))) { cost = R.sumCost(cost, xc); paidExtra = true; }
-        paid = pay(s, p, cost);
-      }
-      (s.played || (s.played = { p1: 0, p2: 0 }))[p]++;
-      f.arr.splice(f.i, 1);
-      c.rev = false; c.fd = false;
-      const how = `${fromHidden ? ' (depuis sa carte cachée)' : flow ? ' depuis sa défausse (Flow)' : ''}${paid && (paid.e || paid.p) ? ` (${paid.e} énergie${paid.p ? `, ${paid.p} puissance` : ''})` : ''}${accel ? ', accéléré' : ''}${repeat ? ', avec Repeat' : ''}`;
-      if (s.showdown) { s.showdown.passes = 0; s.showdown.fresh = false; s.showdown.last = p; }
-      if (d.type === 'Spell') {
-        // spells go on the stack: the opponent may respond with Reactions before it resolves
-        const tg = (Array.isArray(a.targets) ? a.targets : []).filter(id => typeof id === 'string' && find(s, id)).slice(0, 4);
-        c.cb = { by: p, seen: false, flow: !!flow, repeat: !!repeat, legion, targets: tg, bf: a.bf, fx: R.playFx(d, { legion, xp: pl.xp || 0 }).length > 0 };
-        (s.chain || (s.chain = [])).push(c);
-        log(s, `✦ ${seatName(s, p)} lance ${d.name}${how}. ${s.chain.length > 1 ? 'En réponse sur la pile.' : 'Sur la pile : l’adversaire peut réagir.'}`);
-        for (const u of mineOnBoard(s, p)) trigger(s, u, 'playSpell', p, null);
-        legendTrigger(s, p, 'playSpell', { cost: paid ? paid.e : d.energy || 0 });
-        if (fromHidden) legendTrigger(s, p, 'playHidden');
-        return null;
-      }
-      // units enter exhausted unless Accelerate was paid or the card says "I enter ready"; gear enters ready at base
-      // Baron Nashor: "As you play me, add the Baron Pit battlefield token to the board if it's not there already. If you do, I enter there."
-      if (d.type === 'Unit' && /add the Baron Pit battlefield token/i.test(d.text || '') && !s.bfs.some((b, i) => bfName(s, i) === 'Baron Pit')) {
-        const pit = Object.keys(s.cd).find(id => s.cd[id].name === 'Baron Pit' && s.cd[id].type === 'Battlefield');
-        if (pit) { s.bfs.push({ card: mk(s, pit, p), units: { p1: [], p2: [] }, ctrl: null, hidden: [] }); toBf = s.bfs.length - 1; log(s, `${d.name} ajoute le champ de bataille Baron Pit et y entre.`); }
-      }
-      c.ex = d.type === 'Unit' ? !(accel || R.entersReady(d)) : false;
-      (toBf != null && d.type === 'Unit' ? s.bfs[toBf].units[p] : pl.zones.base).push(c);
-      log(s, `✦ ${seatName(s, p)} joue ${d.name}${how}.`);
-      if (toBf != null && d.type === 'Unit') arrive(s, toBf, p);
-      if (s.showdown && s.showdown.last === p) s.showdown.focus = other(p);
-      if (d.type === 'Unit') for (const u of mineOnBoard(s, p)) if (u !== c) trigger(s, u, 'playUnit', p, null);
-      if (d.type === 'Unit') legendTrigger(s, p, 'playUnit', { cost: d.energy || 0, mighty: hp(s, c) >= 5 });
-      if (fromHidden) legendTrigger(s, p, 'playHidden');
-      // Riven, The Exile: units played to battlefields you control enter ready
-      if (d.type === 'Unit' && toBf != null && s.bfs[toBf].ctrl === p && legendOf(s, p) && cd(s, legendOf(s, p)).name === 'Riven, The Exile') c.ex = false;
-      // play effects: everything for the AI (a.targets / a.bf pre-select its choices); for a human, only
-      // what the opponent must decide or reveal (discard, kill one of their units, reveal their hand)
-      const bfAt = toBf != null && (d.type === 'Unit' || fromHidden) ? toBf : null;
-      let fx = R.playFx(d, { legion, xp: pl.xp || 0 });
-      if (d.type === 'Unit' && R.kw(d.text).weaponmaster) fx = [...fx, { who: 'self', kind: 'may', text: 'Équiper un de vos équipements à cette unité (Weaponmaster) ?', cond: 'hasGear', fx: [{ who: 'self', kind: 'equipBest' }] }];
-      if (k.quickDraw && d.type === 'Gear') fx = [{ kind: 'target', op: 'attach', side: 'friendly', where: 'any', who: 'self' }, ...fx];
-      (s.fxPre || (s.fxPre = {}))[c.iid] = (a.targets || []).slice();
-      if ((a.targets || []).length) (s.fxDeclared || (s.fxDeclared = {}))[c.iid] = true;
-      s.fxQueue = [...(s.fxQueue || []), ...fx.map(e => ({ ...e, by: p, card: d.name, src: c.iid, bfAt, preBf: a.bf, fromHidden, legion, paidExtra }))];
-      runFx(s);
-      return null;
-    }
+    case 'play': return playCard(s, who, a);
     case 'chainPass': { // the opponent of the top stack item lets it resolve (AI: after deciding not to react)
       const top = s.chain && s.chain[s.chain.length - 1];
       if (!top) return 'La pile est vide';
@@ -1267,7 +1375,8 @@ function act(s, a, who) {
       bf.hidden = bf.hidden || [];
       if (bf.hidden.length) return 'Il y a déjà une carte cachée sur ce champ de bataille.';
       const freeHide = s.freeHide && s.freeHide.p === who && s.freeHide.turn === s.turn;
-      if (auto(s, who) && !freeHide && !pay(s, who, { e: 0, p: [null] })) return 'Cacher coûte 1 puissance (n’importe quel domaine) : recyclez une rune.';
+      const teemo = legendOf(s, who) && cd(s, legendOf(s, who)).name === 'Teemo, Swift Scout';
+      if (auto(s, who) && !freeHide && !(teemo && pay(s, who, { e: 1, p: [] })) && !pay(s, who, { e: 0, p: [null] })) return 'Cacher coûte 1 puissance (n’importe quel domaine) : recyclez une rune.';
       f.arr.splice(f.i, 1);
       Object.assign(f.c, { fd: true, ex: false, hidT: s.turn, owner: f.c.owner });
       bf.hidden.push(f.c);
@@ -1292,15 +1401,19 @@ function act(s, a, who) {
       if (!ab) return `${d.name} n’a pas de capacité à activer`;
       if (f.c.ex) return `${d.name} est épuisé : redressez-le d’abord.`;
       if (ab.level && (pl.xp || 0) < ab.level) return `Capacité disponible à partir de ${ab.level} XP.`;
+      const blk = abilityBlocked(s, who, f.c, ab); if (blk) return blk;
+      const abCost = abilityCost(s, who, ab);
       const busy = (s.chain && s.chain.length) || s.showdown;
       if (s.chain && s.chain.length && !ab.reaction) return 'Seules les capacités [Reaction] répondent à la pile.';
       if (!ab.reaction && !(ab.action && (who === s.active || s.showdown)) && (who !== s.active || busy)) return 'Cette capacité s’active pendant votre tour, hors affrontement.';
       if (auto(s, who)) {
         if (ab.xp && (pl.xp || 0) < ab.xp) return `Il faut ${ab.xp} XP.`;
-        if ((ab.cost.e || ab.cost.p.length) && !pay(s, who, ab.cost)) return `Pas assez de runes (${costText(ab.cost)}).`;
+        if ((abCost.e || abCost.p.length) && !pay(s, who, abCost)) return `Pas assez de runes (${costText(abCost)}).`;
       }
       if (ab.xp) pl.xp = Math.max(0, (pl.xp || 0) - ab.xp);
       f.c.ex = true;
+      if (ab.disemp) f.c.emp = false;
+      if (abCost.e) legendTrigger(s, who, 'activate', { cost: abCost.e });
       log(s, `⚡ ${W} active ${d.name} : ${ab.text.replace(/:rb_energy_(\d+):/g, '$1 énergie').replace(/:rb_rune_rainbow:/g, '1 puissance au choix').replace(/:rb_rune_(\w+):/g, '1 puissance $1').replace(/:rb_might:/g, 'force')}`);
       const tg = (Array.isArray(a.targets) ? a.targets : []).filter(id => typeof id === 'string' && find(s, id));
       (s.fxPre || (s.fxPre = {}))[f.c.iid] = tg;
@@ -1318,6 +1431,7 @@ function act(s, a, who) {
       if (auto(s, who) && !pay(s, who, cost)) return `Pas assez de runes pour Empower (${costText(cost)}).`;
       f.c.emp = true;
       log(s, `${W} rend ${name(s, f.c)} Empowered.`);
+      if (f.zone !== 'legend') legendTrigger(s, who, 'empowerOther');
       return null;
     }
     case 'gold': { // Gold token: kill this, exhaust: add 1 Power of any domain
@@ -1325,6 +1439,7 @@ function act(s, a, who) {
       if (f.c.ex) return 'Ce Gold est épuisé';
       f.arr.splice(f.i, 1);
       const pl = s.players[who]; (pl.pool || (pl.pool = newPool())).p.push('any');
+      if (legendOf(s, who) && cd(s, legendOf(s, who)).name === 'Renata Glasc, Chem-Baroness' && pl.score >= s.winScore - 3) { pl.pool.e += 1; log(s, `Renata : le Gold ajoute aussi 1 énergie.`); }
       log(s, `${W} utilise un Gold : +1 puissance (n’importe quel domaine) en réserve.`);
       return null;
     }
@@ -1337,20 +1452,14 @@ function act(s, a, who) {
         if (ids.length > 1 || ids.some(id => !q.cards.includes(id))) return 'Choisissez une des cartes proposées';
         const e = q.fx, z = s.players[q.to].zones, W2 = seatName(s, q.to);
         s.pending = null;
-        const i = ids[0] ? (e.from === 'top' ? z.main : z.trash).findIndex(c => c.iid === ids[0]) : -1;
-        const c = i >= 0 ? (e.from === 'top' ? z.main : z.trash).splice(i, 1)[0] : null;
-        if (e.from === 'top') { const rest = z.main.filter(x => q.top.includes(x.iid)); z.main = z.main.filter(x => !q.top.includes(x.iid)).concat(rest); }
+        const src = e.from === 'top' ? z.main : z.trash, c = ids[0] ? src.find(x => x.iid === ids[0]) : null;
+        const recycle = keep => { if (e.from !== 'top') return; const rest = z.main.filter(x => q.top.includes(x.iid) && x !== keep); z.main = z.main.filter(x => !rest.includes(x)).concat(rest); };
+        recycle(c); // "recycle the rest" before the chosen card resolves (its own effects may draw)
         if (!c) log(s, `${W2} ne prend aucune carte (${q.card}).`);
-        else if (e.then === 'hand') { z.hand.push(c); log(s, `${W2} prend ${name(s, c)} en main (${q.card}).`); }
-        else if (e.then === 'playPaid' && auto(s, q.to) && !pay(s, q.to, R.cardCost(cd(s, c)))) { z.main.push(c); log(s, `${W2} ne peut pas payer ${name(s, c)} : recyclé (${q.card}).`); }
-        else if (e.payPower && auto(s, q.to) && !pay(s, q.to, { e: 0, p: R.cardCost(cd(s, c)).p })) { z.trash.push(c); log(s, `${W2} ne peut pas payer la puissance de ${name(s, c)} (${q.card}).`); }
-        else if (cd(s, c).type === 'Spell') { // cast for free: on the stack like any spell
-          c.cb = { by: q.to, seen: false, flow: false, recycle: !!e.recycle, repeat: false, legion: false, targets: [], fx: true };
-          (s.chain || (s.chain = [])).push(c);
-          log(s, `✦ ${W2} lance ${name(s, c)} depuis sa défausse sans payer son énergie (${q.card}).`);
-        } else {
-          c.ex = cd(s, c).type === 'Unit' && !R.entersReady(cd(s, c)); z.base.push(c);
-          log(s, `✦ ${W2} joue ${name(s, c)} depuis sa défausse sans payer son coût (${q.card}).`);
+        else if (e.then === 'hand') { const arr = e.from === 'top' ? z.main : z.trash; /* z.main was rebuilt by recycle() */ arr.splice(arr.indexOf(c), 1); z.hand.push(c); log(s, `${W2} prend ${name(s, c)} en main (${q.card}).`); }
+        else {
+          const err = playCard(s, q.to, { type: 'play', iid: c.iid }, { fx: true, free: e.then !== 'playPaid', powerOnly: !!e.payPower, recycle: !!e.recycle, how: ` grâce à ${q.card}` });
+          if (err) { log(s, `${W2} ne peut pas jouer ${name(s, c)} : ${err}`); if (e.from === 'top') recycle(null); }
         }
         runFx(s);
         return null;
@@ -1362,7 +1471,7 @@ function act(s, a, who) {
         s.pending = null;
         log(s, `${seatName(s, q.to)} ${a.yes ? 'utilise' : 'n’utilise pas'} ${q.card}.`);
         const then = a.yes ? e.fx : e.elseFx || [];
-        if (then.length) s.fxQueue = [...then.map(x => ({ ...x, by: e.by, card: e.card, src: e.src, bfAt: e.bfAt })), ...(s.fxQueue || [])];
+        if (then.length) s.fxQueue = [...then.map(x => ({ ...x, by: e.by, card: e.card, src: e.src, bfAt: e.bfAt, ctxIid: e.ctxIid })), ...(s.fxQueue || [])];
         runFx(s);
         return null;
       }
@@ -1433,6 +1542,7 @@ function act(s, a, who) {
       const wrap = c => { const k = kwOf(s, c); return { c, dmg: c.dmg || 0, stun: !!c.st, tank: k.tank || !!c.tt, backline: k.backline }; };
       const WA = A.filter(isU).map(wrap), WD = D.filter(isU).map(wrap);
       const before = { a: WA.filter(u => !u.stun).reduce((t, u) => t + hp(s, u.c, 'a'), 0), d: WD.filter(u => !u.stun).reduce((t, u) => t + hp(s, u.c, 'd'), 0) };
+      s.excess = { turn: s.turn, bf: a.bf, p: att, n: Math.max(0, before.a - WD.reduce((t, u) => t + Math.max(0, lethal(s, u.c) - u.dmg), 0)) };
       const { deadA, deadD } = R.combat(WA, WD, u => hp(s, u.c, 'a'), u => hp(s, u.c, 'd'));
       for (const u of [...WA, ...WD]) u.c.dmg = u.dmg;
       log(s, `⚔ Combat sur ${bf.card ? name(s, bf.card) : 'le champ de bataille'} : ${seatName(s, att)} (${before.a}) contre ${seatName(s, def)} (${before.d}).`);
@@ -1545,6 +1655,8 @@ function act(s, a, who) {
       if (auto(s, s.active)) s.bfs.forEach((b, i) => { if (b.units.p1.some(c => cd(s, c).type === 'Unit') && b.units.p2.some(c => cd(s, c).type === 'Unit')) act(s, { type: 'fight', bf: i, att: s.active }, s.active); });
       for (const c of [...s.bfs.flatMap(b => [...b.units.p1, ...b.units.p2]), ...s.players.p1.zones.base, ...s.players.p2.zones.base]) { c.dmg = 0; c.tb = 0; c.ta = 0; c.ts = 0; c.tt = false; c.st = false; c.tg = false; }
       for (const p of SEATS) for (const c of s.players[p].zones.hand) c.rev = false;
+      for (const c of SEATS.flatMap(q => unitsOf(s, q))) if (c.killEnd === s.turn) { const f = find(s, c.iid); if (f) kill(s, f); }
+      syncCtrl(s);
       legendTrigger(s, s.active, 'endTurn');
       const er = s.endReady && s.endReady[s.active];
       if (er) { let k = 0; for (const r of s.players[s.active].zones.runes) if (r.ex && k < er) { r.ex = false; k++; } delete s.endReady[s.active]; log(s, `${seatName(s, s.active)} redresse ${k} rune${k > 1 ? 's' : ''} (Targon's Peak).`); }
@@ -1598,7 +1710,7 @@ function canRespond(s, p) {
   const pl = s.players[p], runes = runesOf(s, p), pool = pl.pool || newPool();
   if (pl.zones.hand.some(c => { const d = cd(s, c); return R.kw(d.text).reaction && R.planCost(runes, pool, R.cardCost(d)); })) return true;
   if (s.bfs.some(b => (b.hidden || []).some(c => c.owner === p && s.turn > (c.hidT || 0)))) return true;
-  return mineOnBoard(s, p).some(c => R.abilities(cd(s, c)).some(ab => ab.reaction && !c.ex));
+  return mineOnBoard(s, p).some(c => R.abilities(cd(s, c)).some(ab => ab.reaction && !c.ex && !abilityBlocked(s, p, c, ab)));
 }
 
-module.exports = { canRespond, newState, apply, viewFor, hp, cd, other, runesOf, candidates, lethal, find };
+module.exports = { abilityBlocked, abilityCost, canRespond, newState, apply, viewFor, hp, cd, other, runesOf, candidates, lethal, find };

@@ -628,15 +628,18 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     assert.equal(g.apply(s, { type: 'resolve', seat: P, yes: true }), null);
     assert.ok(Z.legend[0].ex, "Rek'Sai exhausted");
     assert.equal(s.pending && s.pending.kind, 'pick', 'choose among the top 2');
-    const top = s.pending.cards[0];
+    assert.equal(s.pending.top.length, 2, 'both revealed cards are shown');
+    const top = s.pending.cards[0], other2 = s.pending.top.find(id => id !== top), played0 = s.played[P];
     assert.equal(g.apply(s, { type: 'resolve', seat: P, iids: [top] }), null);
     assert.ok(['base', 'bf'].includes(g.find(s, top).zone), 'the card is played');
+    assert.equal(s.played[P], played0 + 1, 'it counts as a card played this turn ([Legion])');
+    assert.equal(Z.main[Z.main.length - 1].iid, other2, 'the other one is recycled');
   }
   { // Imperial Decree: 1 damage kills; Tactical Retreat: recalled instead of dying; Pyke pays its additional cost
     const s = mk(), P = s.active, O = other(P), Z = s.players[P].zones;
     for (const n of ['Imperial Decree', 'Tactical Retreat', 'Pyke, Dockside Butcher']) s.cd[by(n).id] = by(n);
     s.auto = { p1: false, p2: false };
-    const take = (p, id) => { const z = s.players[p].zones, c = z.main.find(x => g.cd(s, x).type === 'Unit' && (g.cd(s, x).might || 0) >= 3); z.main.splice(z.main.indexOf(c), 1); c.iid = id; c.ex = false; return c; };
+    const take = (p, id) => { const z = s.players[p].zones, c = z.main.find(x => g.cd(s, x).type === 'Unit' && (g.cd(s, x).might || 0) >= 3 && !/Deathknell/i.test(g.cd(s, x).text || '')); z.main.splice(z.main.indexOf(c), 1); c.iid = id; c.ex = false; return c; };
     const a = take(P, 'ua'), b = take(O, 'ub'); s.bfs[0].units[P].push(a); s.bfs[1].units[O].push(b);
     Z.hand.push(card(s, 'dec', 'Imperial Decree', P));
     assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'dec' }), null); g.apply(s, { type: 'chainPass', seat: O });
@@ -725,6 +728,129 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     g.apply(s, { type: 'move', seat: P, iid: u.iid, to: { bf: 0, side: P } });
     g.apply(s, { type: 'conquer', seat: P, bf: 0 });
     assert.ok(!s.pending && s.log.some(l => /Zaun Warrens \(conquête.*À appliquer à la main/.test(l.msg)), 'manual mode: written in the log');
+  }
+  /* ---- every legend: hand-written abilities and passives, in auto mode ---- */
+  const legendGame = n => {
+    const s = mk(), P = s.active, O = other(P), Z = s.players[P].zones;
+    s.cd[by(n).id] = by(n); s.auto = { p1: true, p2: true };
+    Z.legend = [card(s, 'lg', n, P)];
+    const fury = all.find(c => c.name === 'Fury Rune'); s.cd[fury.id] = fury;
+    while (Z.runes.length < 8) Z.runes.push({ iid: 'fr' + Z.runes.length, cid: fury.id, owner: P, ex: false });
+    Z.runes.forEach(r => (r.ex = false));
+    const unit = (id, where = 'base', p = P) => { const z = s.players[p].zones, us = z.main.filter(x => g.cd(s, x).type === 'Unit'), c = us.find(x => !/conquer|move|play me|When|hold/i.test(g.cd(s, x).text || '')) || us[0]; z.main.splice(z.main.indexOf(c), 1); Object.assign(c, { iid: id, ex: false }); (where === 'base' ? z.base : s.bfs[where].units[p]).push(c); return c; };
+    return { s, P, O, Z, unit, L: Z.legend[0] };
+  };
+  { // Ekko: empower (ability 1), then disempower: the next unit costs 2 Energy + 1 Power less and dies at end of turn
+    const { s, P, Z, L } = legendGame('Ekko, Boy Who Shattered Time');
+    assert.ok(g.apply(s, { type: 'activate', seat: P, iid: 'lg', k: 1 }), 'disempower needs Empowered');
+    assert.equal(g.apply(s, { type: 'activate', seat: P, iid: 'lg', k: 0 }), null); assert.ok(L.emp, 'Ekko empowered');
+    L.ex = false;
+    assert.equal(g.apply(s, { type: 'activate', seat: P, iid: 'lg', k: 1 }), null); assert.ok(!L.emp && s.unitDisc, 'discount set');
+    const u = Z.main.find(x => g.cd(s, x).type === 'Unit' && (g.cd(s, x).energy || 0) >= 3); Z.main.splice(Z.main.indexOf(u), 1); Z.hand.push(u);
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: u.iid }), null);
+    assert.equal(u.killEnd, s.turn, 'marked');
+    while (s.pending) g.apply(s, { type: 'resolve', seat: s.pending.to, yes: false, iids: [] });
+    g.apply(s, { type: 'endTurn', seat: P });
+    assert.equal(g.find(s, u.iid).zone, 'trash', 'killed at end of turn');
+  }
+  { // Yasuo: to a battlefield and back; Miss Fortune: Ganking; Shen: Tank
+    const { s, P, unit } = legendGame('Yasuo, Unforgiven'); const u = unit('y1');
+    assert.equal(g.apply(s, { type: 'activate', seat: P, iid: 'lg', targets: ['y1'], bf: 1 }), null);
+    assert.equal(g.find(s, 'y1').bf, 1, 'Yasuo: to a battlefield');
+    s.players[P].zones.legend[0].ex = false;
+    assert.equal(g.apply(s, { type: 'activate', seat: P, iid: 'lg', targets: ['y1'] }), null);
+    assert.equal(g.find(s, 'y1').zone, 'base', 'Yasuo: back to base');
+    const m = legendGame('Miss Fortune, Bounty Hunter'); m.unit('mf');
+    assert.equal(g.apply(m.s, { type: 'activate', seat: m.P, iid: 'lg', targets: ['mf'] }), null); assert.ok(g.find(m.s, 'mf').c.tg, 'Ganking this turn');
+    const sh = legendGame('Shen, Eye of Twilight'); sh.unit('sh');
+    assert.equal(g.apply(sh.s, { type: 'activate', seat: sh.P, iid: 'lg', targets: ['sh'] }), null); assert.ok(g.find(sh.s, 'sh').c.tt, 'Tank this turn');
+  }
+  { // Jax: attach a detached Equipment
+    const { s, P, Z, unit } = legendGame('Jax, Grandmaster at Arms'); unit('jx');
+    const sw = by("Doran's Blade"); s.cd[sw.id] = sw; Z.base.push({ iid: 'sw', cid: sw.id, owner: P, ex: false });
+    assert.equal(g.apply(s, { type: 'activate', seat: P, iid: 'lg', k: 0, targets: ['sw', 'jx'] }), null);
+    assert.equal(g.find(s, 'sw').c.att, 'jx', 'Jax attaches the Equipment');
+  }
+  { // Irelia: choosing an exhausted friendly unit with a spell: pay 1 Power and exhaust her to ready it
+    const { s, P, Z, unit, L } = legendGame('Irelia, Blade Dancer'); const u = unit('ir'); u.ex = true;
+    const sp = by('Twilight Shroud'); s.cd[sp.id] = sp;
+    Z.hand.push({ iid: 'sp', cid: sp.id, owner: P, ex: false });
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'sp', targets: ['ir'] }), null);
+    g.apply(s, { type: 'chainPass', seat: other(P) }); g.apply(s, { type: 'chainResolve', seat: P });
+    assert.equal(s.pending && s.pending.kind, 'confirm', 'Irelia asks');
+    assert.equal(g.apply(s, { type: 'resolve', seat: P, yes: true }), null);
+    assert.ok(!u.ex && L.ex, 'unit readied, Irelia exhausted');
+  }
+  { // Sett: a buffed unit that would die is recalled exhausted instead
+    const { s, P, unit, L } = legendGame('Sett, The Boss'); const u = unit('st', 0); u.buff = 1;
+    assert.equal(g.apply(s, { type: 'damage', seat: P, iid: 'st', n: 20 }), null);
+    assert.deepEqual([g.find(s, 'st').zone, u.buff, u.ex, L.ex], ['base', 0, true, true], 'Sett saves it');
+  }
+  { // Ivern: conquer -> Brush; Vi: no prompt without 3 excess damage
+    const { s, P, unit } = legendGame('Ivern, Green Father'); const u = unit('iv');
+    g.apply(s, { type: 'move', seat: P, iid: 'iv', to: { bf: 0, side: P } });
+    while (s.pending && s.pending.card !== 'Ivern, Green Father') g.apply(s, { type: 'resolve', seat: s.pending.to, yes: false, iids: [] });
+    assert.equal(s.pending && s.pending.kind, 'confirm', 'Ivern asks');
+    g.apply(s, { type: 'resolve', seat: P, yes: true });
+    assert.equal(g.cd(s, s.bfs[0].card).name, 'Brush', 'battlefield replaced by Brush');
+    const v = legendGame('Vi, Piltover Enforcer'); v.unit('vi');
+    g.apply(v.s, { type: 'move', seat: v.P, iid: 'vi', to: { bf: 0, side: v.P } });
+    assert.ok(!(v.s.pending && v.s.pending.card === 'Vi, Piltover Enforcer'), 'Vi needs 3 excess damage');
+  }
+  { // Teemo: hiding costs 1 Energy instead of a recycled rune; Darius: [Legion] needed
+    const { s, P, Z, unit } = legendGame('Teemo, Swift Scout'); unit('tm', 0); s.bfs[0].ctrl = P;
+    const hc = all.find(c => /\[Hidden\]/.test(c.text || '') && c.type === 'Spell'); s.cd[hc.id] = hc; Z.hand.push({ iid: 'hc', cid: hc.id, owner: P, ex: false });
+    const runes = Z.runes.length;
+    assert.equal(g.apply(s, { type: 'hide', seat: P, iid: 'hc', bf: 0 }), null);
+    assert.equal(Z.runes.length, runes, 'no rune recycled (paid 1 Energy)');
+    const d = legendGame('Darius, Hand of Noxus');
+    assert.ok(g.apply(d.s, { type: 'activate', seat: d.P, iid: 'lg' }), 'Darius: Legion needed');
+    d.s.played[d.P] = 1;
+    assert.equal(g.apply(d.s, { type: 'activate', seat: d.P, iid: 'lg' }), null);
+  }
+  { // Fiora: a unit becoming Mighty asks to channel; Jhin: 4 banished spells
+    const { s, P, Z, unit } = legendGame('Fiora, Grand Duelist'); const u = unit('fi');
+    const r0 = Z.runes[0].iid; g.apply(s, { type: 'exhaust', seat: P, iid: r0, value: false }); // first watch
+    u.tb = 10; g.apply(s, { type: 'exhaust', seat: P, iid: r0, value: false });
+    assert.equal(s.pending && s.pending.card, 'Fiora, Grand Duelist', 'Fiora asks when a unit becomes Mighty');
+    const runes = Z.runes.length; g.apply(s, { type: 'resolve', seat: P, yes: true });
+    assert.equal(Z.runes.length, runes + 1, 'channeled');
+    const j = legendGame('Jhin, Virtuoso'), JZ = j.Z;
+    const sp = by('Concentrate');
+    {
+      j.s.cd[sp.id] = sp;
+      for (let i = 0; i < 4; i++) {
+        j.Z.runes.forEach(r => (r.ex = false)); j.Z.hand.push({ iid: 'js' + i, cid: sp.id, owner: j.P, ex: false });
+        assert.equal(g.apply(j.s, { type: 'play', seat: j.P, iid: 'js' + i }), null);
+        assert.equal(j.s.pending && j.s.pending.card, 'Jhin, Virtuoso', 'Jhin asks'); g.apply(j.s, { type: 'resolve', seat: j.P, yes: true });
+        g.apply(j.s, { type: 'chainPass', seat: j.O }); g.apply(j.s, { type: 'chainResolve', seat: j.P });
+      }
+      assert.ok(JZ.trash.filter(c => c.cid === sp.id).length === 4 && !JZ.banish.some(c => c.jhin), 'Jhin: the 4 spells go to the trash');
+    }
+  }
+  { // a card taken from the top of the deck into the hand leaves the deck (no duplicate instance)
+    const { s, P, Z } = legendGame('Annie, Dark Child');
+    const tc = by('Trifarian Captain'); s.cd[tc.id] = tc; Z.hand.push({ iid: 'tc', cid: tc.id, owner: P, ex: false });
+    const u = Z.main.find(x => g.cd(s, x).type === 'Unit' && (g.cd(s, x).energy || 0) <= 3 && !(g.cd(s, x).power > 1)); Z.main.splice(Z.main.indexOf(u), 1); Z.main.unshift(u);
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'tc' }), null);
+    assert.equal(s.pending && s.pending.kind, 'pick');
+    assert.equal(g.apply(s, { type: 'resolve', seat: P, iids: [s.pending.cards[0]] }), null);
+    const id = Z.hand[Z.hand.length - 1].iid;
+    assert.ok(!Z.main.some(x => x.iid === id), 'not left in the deck');
+  }
+  { // Orianna: start of the Main Phase, pay 1 to animate a gear
+    const { s, P, O, Z } = legendGame('Orianna, Lady of Clockwork');
+    const gear = all.find(c => c.type === 'Gear' && (c.energy || 0) >= 2 && !/\[Equip\]/.test(c.text || '')); s.cd[gear.id] = gear;
+    Z.base.push({ iid: 'og', cid: gear.id, owner: P, ex: false });
+    while (s.pending) g.apply(s, { type: 'resolve', seat: s.pending.to, yes: false, iids: [] });
+    g.apply(s, { type: 'endTurn', seat: P });
+    while (s.pending && s.pending.to === O) g.apply(s, { type: 'resolve', seat: O, yes: false, iids: [] });
+    s.active === O && g.apply(s, { type: 'endTurn', seat: O });
+    while (s.pending && s.pending.card !== 'Orianna, Lady of Clockwork') g.apply(s, { type: 'resolve', seat: s.pending.to, yes: false, iids: s.pending.kind === 'discard' ? s.players[s.pending.to].zones.hand.slice(0, s.pending.n).map(c => c.iid) : [] });
+    assert.equal(s.pending && s.pending.card, 'Orianna, Lady of Clockwork', 'Orianna asks at the start of the Main Phase');
+    g.apply(s, { type: 'resolve', seat: P, yes: true });
+    assert.equal(g.cd(s, g.find(s, 'og').c).type, 'Unit', 'the gear is a unit');
+    assert.equal(g.hp(s, g.find(s, 'og').c), gear.energy, 'Might = Energy cost');
   }
 }
 console.log('self-check OK');

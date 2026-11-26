@@ -993,7 +993,7 @@ function renderPrompt(P, v) {
     : q.kind === 'target' ? q.opts.map(id => locate(id)).filter(Boolean).map(L => L.c)
     : q.kind === 'bf' ? q.opts.map(i => v.bfs[i].card).filter(Boolean)
     : q.kind === 'predict' ? q.cards.map(id => v.players[me].zones.main.find(c => c.iid === id)).filter(Boolean)
-    : q.kind === 'pick' ? q.cards.map(id => [...v.players[me].zones.trash, ...v.players[me].zones.main].find(c => c.iid === id)).filter(Boolean)
+    : q.kind === 'pick' ? (q.top || q.cards).map(id => [...v.players[me].zones.trash, ...v.players[me].zones.main].find(c => c.iid === id)).filter(Boolean)
     : myUnits.filter(c => c.iid !== q.exclude);
   const multi = q.kind === 'predict', max = multi ? pool.length : q.n;
   const mark = q.kind === 'discard' || q.kind === 'sacrifice' ? 'toss' : 'chosen';
@@ -1006,7 +1006,7 @@ function renderPrompt(P, v) {
     assault: `Donnez [Assault ${fx.n === 'might' ? '= force' : fx.n}] ce tour`, shield: `Donnez [Shield ${fx.n}]${fx.tank ? ' et [Tank]' : ''} ce tour`, double: 'Doublez la force d’une unité', mark: 'Choisissez votre unité',
     duel: 'Choisissez l’unité adverse (dégâts = force)', blink: 'Choisissez l’unité à bannir et rejouer', moveTo: 'Choisissez l’unité à déplacer', deck: 'Placez une unité sous le deck', dmgSplash: `Infligez ${fx.n} (et ${fx.splash} aux autres ennemis là-bas)` };
   const title = { discard: `Défaussez ${q.n} carte${q.n > 1 ? 's' : ''}`, sacrifice: 'Détruisez une de vos unités', buff: 'Buffez une unité', target: OP[fx.op] || 'Choisissez une cible', bf: fx.kind === 'target' ? 'Choisissez le champ de bataille' : fx.kind === 'bfBuff' ? 'Choisissez un champ de bataille' : `${fx.n} dégâts aux ennemis d’un champ de bataille`, predict: 'Prédiction', pick: 'Choisissez une carte' }[q.kind];
-  const help = { discard: 'Cliquez sur les cartes de votre main à défausser.', sacrifice: 'Cliquez sur l’unité à détruire.', buff: 'Cliquez sur l’unité alliée qui reçoit le buff (+1 force si elle n’en a pas déjà un).', target: 'Cliquez sur la cible. Les unités ennemies sont marquées en rouge.', bf: 'Cliquez sur le champ de bataille visé.', pick: `${q.card} : cliquez sur la carte à prendre (ou « Aucune cible » pour ne rien prendre).`, predict: 'Le dessus de votre deck. Cliquez sur les cartes à recycler sous le deck, les autres restent dessus.' }[q.kind];
+  const help = { discard: 'Cliquez sur les cartes de votre main à défausser.', sacrifice: 'Cliquez sur l’unité à détruire.', buff: 'Cliquez sur l’unité alliée qui reçoit le buff (+1 force si elle n’en a pas déjà un).', target: 'Cliquez sur la cible. Les unités ennemies sont marquées en rouge.', bf: 'Cliquez sur le champ de bataille visé.', pick: `${q.card} : cliquez sur la carte à prendre ou à jouer (les cartes grisées ne sont pas jouables).`, predict: 'Le dessus de votre deck. Cliquez sur les cartes à recycler sous le deck, les autres restent dessus.' }[q.kind];
   const btnLabel = () => (multi ? (S.pick.size ? `Recycler ${S.pick.size} carte${S.pick.size > 1 ? 's' : ''}` : 'Tout garder') : 'Valider');
   P.innerHTML = '';
   P.append(h('div', { class: 'pg' },
@@ -1017,6 +1017,7 @@ function renderPrompt(P, v) {
       el.onmouseenter = () => showPreview(d, c);
       el.dataset.iid = c.iid;
       if (q.kind === 'target') { const L = locate(c.iid); el.classList.add(L && (L.p || L.side) === me ? 'ally' : 'enemy'); }
+      if (q.kind === 'pick' && !q.cards.includes(c.iid)) { el.classList.add('nopick'); el.title = T('Non jouable (coût ou type)'); return el; }
       el.onclick = () => {
         if (S.pick.has(c.iid)) S.pick.delete(c.iid); else { if (S.pick.size >= max) S.pick.delete([...S.pick][0]); S.pick.add(c.iid); }
         P.querySelectorAll('.pg-cards .card').forEach(x => x.classList.toggle(mark, S.pick.has(x.dataset.iid)));
@@ -1029,7 +1030,7 @@ function renderPrompt(P, v) {
       const ids = [...S.pick]; S.pick.clear();
       if (q.kind === 'bf') { const el = P.querySelector(`.pg-cards .card[data-iid="${ids[0]}"]`); return send({ type: 'resolve', bf: +el.dataset.bfi }); }
       send({ type: 'resolve', iids: ids });
-    } }, btnLabel()), q.opt ? h('button', { class: 'btn big', onclick: () => { S.pick.clear(); send({ type: 'resolve', iids: [] }); } }, 'Aucune cible') : '')));
+    } }, btnLabel()), q.opt ? h('button', { class: 'btn big', onclick: () => { S.pick.clear(); send({ type: 'resolve', iids: [] }); } }, q.kind === 'pick' ? 'Ne rien prendre' : 'Aucune cible') : '')));
   P.classList.add('show');
 }
 
@@ -1384,7 +1385,7 @@ function cardMenu(e, iid) {
     L.zone === 'trash' && mine && /\[Flow\]/.test(txt) ? [`✦ Jouer depuis la défausse (Flow : ${costLabel(txt, 'Flow')})`, () => { closeModal(); send({ type: 'play', iid, flow: true }); }] : null,
     onBoard && mine && d && d.type === 'Gear' && /\[Equip\]/.test(txt) ? (c.att ? ['Détacher l’équipement', () => send({ type: 'unequip', iid })]
       : { sub: `Équiper (${costLabel(txt, 'Equip')})`, items: myUnits.length ? myUnits.map(u => [(cardOf(u) || {}).name || 'unité', () => send({ type: 'equip', iid, unit: u.iid })]) : [['Aucune unité', () => {}]] }) : null,
-    ...(onBoard && mine && d && d.ab ? d.ab.map((ab, k) => [`⚡ ${rbText(ab.text)}${ab.e || ab.p || ab.kill || ab.xp ? ` (${[ab.e ? ab.e + ' ⚡' : '', ab.p ? ab.p + ' ◆' : '', ab.xp ? ab.xp + ' XP' : '', ab.kill ? 'détruire cette carte' : ''].filter(Boolean).join(' + ')})` : ''}${c.ex ? ' — épuisé' : ''}`, () => activate(iid, k)]) : []),
+    ...(onBoard && mine && d && d.ab ? d.ab.map((ab, k) => [`⚡ ${rbText(ab.text)}${ab.e || ab.p || ab.kill || ab.xp || ab.disemp ? ` (${[ab.e ? ab.e + ' ⚡' : '', ab.p ? ab.p + ' ◆' : '', ab.xp ? ab.xp + ' XP' : '', ab.kill ? 'détruire cette carte' : '', ab.disemp ? 'retirer Empowered' : ''].filter(Boolean).join(' + ')})` : ''}${c.ex ? ' — épuisé' : ''}`, () => activate(iid, k)]) : []),
     onBoard && mine && /\[Empower\]/.test(txt) ? [c.emp ? 'Retirer le renfort (Empowered)' : `Renforcer (Empower ${costLabel(txt, 'Empower')})`, () => send({ type: 'empower', iid })] : null,
     onBoard && mine && d && d.name === 'Gold' && d.supertype === 'Token' ? ['Utiliser le Gold (+1 puissance au choix)', () => send({ type: 'gold', iid })] : null,
     inHand && mine && d && ['Unit', 'Spell', 'Gear'].includes(d.type) ? [d.type === 'Spell' ? '✦ Lancer (sur la pile)' : '✦ Jouer', () => playCard(iid), 'P'] : null,

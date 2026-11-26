@@ -820,3 +820,4 @@ body.dragging-hidden .bf .bfhidden.me:empty::after { content: '?'; margin: auto;
 .hud .score > button, .hud .score .val, .hud .score .pips { display: none; }
 .board { padding-right: 64px; padding-left: 64px; }
 .half.me .track { left: -58px; } .half.op .track { right: -58px; }
+.pg-cards .card.nopick { opacity: .4; filter: grayscale(.8); cursor: not-allowed; }
