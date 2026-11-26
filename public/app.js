@@ -695,7 +695,8 @@ function buildSkeleton() {
       zoneBox('z-base', 'Base' + (isMe ? '' : ' · ' + pname(p)), { p, zone: 'base' }, h('div', { class: 'row', 'data-z': p + ':base' })),
       zoneBox('z-runes', 'Réserve de runes', { p, zone: 'runes' }, [h('div', { class: 'pool', 'data-pool': p }), h('div', { class: 'row', 'data-z': p + ':runes', title: isMe ? 'Clic : épuiser / redresser une rune (+1 énergie en réserve)' : '' })]),
       ...[['main', 'Deck', 'top'], ['trash', 'Défausse', 'top'], ['runeDeck', 'Deck de runes', 'bottom'], ['banish', 'Bannis', 'top']].map(([z, label, pos]) =>
-        zoneBox('pz-' + z, label, { p, zone: z, pos }, h('div', { class: 'slot pile', 'data-pile': p + ':' + z, title: PILE_TIP[z](p === S.me) }, h('div', { class: 'stack', 'data-z': p + ':' + z }), h('span', { class: 'count' })))));
+        zoneBox('pz-' + z, label, { p, zone: z, pos }, h('div', { class: 'slot pile', 'data-pile': p + ':' + z, title: PILE_TIP[z](p === S.me) }, h('div', { class: 'stack', 'data-z': p + ':' + z }), h('span', { class: 'count' })))),
+      h('div', { class: 'track ' + cls, 'data-track': p }));
   };
   const bfs = h('div', { class: 'bfrow' }, v.bfs.map((b, i) => h('div', { class: 'bf', 'data-bf': i },
     h('div', { class: 'units', 'data-drop': JSON.stringify({ bf: i, side: op }), 'data-z': `bf${i}:${op}` }),
@@ -850,7 +851,7 @@ function renderGame() {
   // removed cards
   for (const [iid, el] of els) if (!seen.has(iid)) { el.remove(); els.delete(iid); }
 
-  placeOpHand();
+  placeOpHand(); renderTracks();
   // FLIP: last, invert, play
   let moved = 0;
   for (const [iid, el] of els) {
@@ -1241,6 +1242,15 @@ function drawArrows() {
   }
 }
 window.addEventListener('resize', () => { drawArrows(); placeOpHand(); });
+// score tracks (0 .. victory score) beside each player's row; click a number to set that score
+function renderTracks() {
+  for (const el of $$('[data-track]')) {
+    const p = el.dataset.track, sc = S.v.players[p].score, win = S.v.winScore || 8, key = sc + '/' + win;
+    if (el.dataset.key === key) continue;
+    el.dataset.key = key; el.innerHTML = '';
+    for (let n = 0; n <= win; n++) el.append(h('button', { class: 'pip' + (n === sc ? ' on' : '') + (n === win ? ' win' : '') + (n < sc ? ' past' : ''), title: `${pname(p)} : ${n} point${n > 1 ? 's' : ''}`, onclick: () => n !== sc && send({ type: 'score', p, delta: n - sc }) }, String(n)));
+  }
+}
 // the opponent's hand hangs under the top bar, centred between the die button and "Annuler"
 function placeOpHand() {
   const w = $('.handwrap.op'), board = $('#board'), a = $('.hud .dicebtn'), b = $('.hud .undobtn');
