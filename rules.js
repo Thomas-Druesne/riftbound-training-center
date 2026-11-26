@@ -9,10 +9,11 @@ function timing(t, k) {
 function kw(text) {
   const t = text || '';
   if (kwCache.has(t)) return kwCache.get(t);
-  const n = re => { const m = re.exec(t); return m ? (m[1] ? +m[1] : 1) : 0; };
+  const u = t.replace(/\[(?:Empowered|Level \d+)\]\s*\[(?:>|&gt;)\][^.]*\.?/g, ''); // unconditional part
+  const n = re => { const m = re.exec(u); return m ? (m[1] ? +m[1] : 1) : 0; };
   const k = {
     assault: n(/\[Assault(?: (\d+))?\]/), shield: n(/\[Shield(?: (\d+))?\]/),
-    tank: /\[Tank\]/.test(t), ganking: /\[Ganking\]/.test(t), accelerate: /\[Accelerate\]/.test(t),
+    tank: /\[Tank\]/.test(u), ganking: /\[Ganking\]/.test(u), deploy: /^\s*\[Deploy\]/.test(t), accelerate: /\[Accelerate\]/.test(t),
     onPlayDraw: n(/When you play me, draw (\d+)/i),
     // Ambush / "can be played to a battlefield": may enter directly where you already have units
     ambush: /\[Ambush\]|can be played to a battlefield/i.test(t),
@@ -21,7 +22,7 @@ function kw(text) {
     temporary: /\[Temporary\]/.test(t) && !/Give (?:a|it|that)[^.]*\[Temporary\]/i.test(t),
     hunt: n(/\[Hunt(?: (\d+))?\]/),
     deathDraw: n(/\[Deathknell\]\s*\[(?:>|&gt;)\]\s*Draw (\d+)\./),
-    backline: /\[Backline\]/.test(t), disarm: n(/\[Disarm(?: (\d+))?\]/), deflect: n(/\[Deflect(?: (\d+))?\]/),
+    backline: /\[Backline\]/.test(u), disarm: n(/\[Disarm(?: (\d+))?\]/), deflect: n(/\[Deflect(?: (\d+))?\]/),
     weaponmaster: /\[Weaponmaster\]/.test(t),
     hidden: /\[Hidden\]|(^|\n)Hidden \(/.test(t), quickDraw: /^[^.]*\[Quick-Draw\]/.test(t), equip: /\[Equip\]/.test(t),
     // timing permission of the card itself: a leading [Reaction] / [Action] keyword (not an "[Action][>]" ability)
@@ -211,8 +212,12 @@ Object.assign(CARD_FX, {
   'Tornado Warrior': [T('empTurn', { where: 'here', ifHidden: true, opt: true })],
   'Raging Firebrand': [{ who: 'self', kind: 'spellDisc', n: 5 }],
   'Wuju Apprentice': [{ who: 'self', kind: 'draw', n: 1, cond: 'xp6' }],
-  'Gutter Guardian': [{ who: 'self', kind: 'add', cost: { e: 0, p: [null] }, cond: 'showHidden' }],
-  'The Empyrean': [{ who: 'self', kind: 'draw', n: 2, cond: 'hand' }],
+  'Gutter Guardian': [{ who: 'self', kind: 'add', cost: { e: 0, p: [null] }, cond: 'showedOff' }],
+  'The Empyrean': [{ who: 'self', kind: 'predict', n: 'showPower', cond: 'showedOff' }, { who: 'self', kind: 'draw', n: 2, cond: 'showedOff' }],
+  'Battle Preparations': [T('might', { n: 2 }), { who: 'self', kind: 'readyRunes', n: 2, cond: 'showedOff' }],
+  'Rousing Display': [{ who: 'self', kind: 'token', name: 'Recruit', n: 2, cond: 'notShowedOff' }, { who: 'self', kind: 'token', name: 'Recruit', n: 4, cond: 'showedOff' }],
+  'Primordial Roar': [T('dmg', { n: 'showMight', cond: 'showedOff' })],
+  'Incorrigible Construct': [T('ready', { self: true, cond: 'showedOff' })],
   'Forgotten Relic': [{ who: 'self', kind: 'burn', n: 1 }],
   'Jayce, Brilliant Inventor': [T('ready', { notSelf: true, opt: true })],
   'Elnuk Herd': [T('might', { n: 3, side: 'friendly', notSelf: true }), { who: 'self', kind: 'recycleSelf', ifHidden: true }],
@@ -319,6 +324,20 @@ const TRIGGER = {
 };
 const TRIG_FX = {
   'Lucian, Merciless': { conquer: [T('ready', { self: true })] },
+  'Clocktower Guardian': { hold: [{ who: 'self', kind: 'predict', n: 3 }], deathknell: [{ who: 'self', kind: 'pick', from: 'top', n: 1, then: 'playFree', payPower: true, restTo: 'banish' }] },
+  'Dramatic Visionary': { deathknell: [{ who: 'self', kind: 'predict', n: 2 }] },
+  'Ekko, Recurrent': { deathknell: [{ who: 'self', kind: 'recycleDead' }, { who: 'self', kind: 'readyRunes', n: 99 }] },
+  'Glasc Mixologist': { deathknell: [{ who: 'self', kind: 'pick', from: 'trash', filter: { types: ['Unit'], maxE: 3, maxP: 1 }, then: 'playFree' }] },
+  "Kog'Maw, Caustic": { deathknell: [{ who: 'self', kind: 'aoeHere', n: 4 }] },
+  'Lonely Poro': { deathknell: [{ who: 'self', kind: 'draw', n: 1, cond: 'diedAlone' }] },
+  'Loyal Poro': { deathknell: [{ who: 'self', kind: 'draw', n: 1, cond: 'notAlone' }] },
+  'Mournful Spirit': { deathknell: [T('kill', { where: 'here', opt: true }), T('kill', { where: 'here', gear: true, opt: true })] },
+  'Rift Herald': { move: [{ who: 'self', kind: 'pick', from: 'top', n: 3, filter: { types: ['Unit'] }, then: 'hand' }], deathknell: [{ who: 'self', kind: 'pick', from: 'hand', filter: { types: ['Unit'] }, then: 'playFree', payPower: true }] },
+  'Sprite Fountain': { deathknell: [{ who: 'self', kind: 'token', name: 'Sprite', n: 1, ready: true }] },
+  'The Zero Drive': { deathknell: [{ who: 'self', kind: 'banishDead' }] },
+  'Unsung Hero': { deathknell: [{ who: 'self', kind: 'draw', n: 2, cond: 'wasMighty' }] },
+  // Bomb gear token ([Deploy]): when it dies, deal 2 to an enemy there and kill your other Bombs there
+  'Bomb': { deathknell: [T('dmg', { n: 2, side: 'enemy', where: 'here' }), { who: 'self', kind: 'killBombsHere' }] },
   'Irresistible Faefolk': { move: [T('moveTo', { side: 'enemy', to: 'here', opt: true, notHere: true })] },
 };
 function triggerFx(card, ev) {
@@ -588,8 +607,7 @@ const LEGEND_AB = {
   "K'Sante, Pride of Nazumah": [{ text: 'Give a friendly unit [Assault] equal to its [Shield] this turn.', cost: EC(1), fx: [T('assault', { n: 'shield', side: 'friendly' })] }],
   'Teemo, Swift Scout': [{ text: 'Put a Teemo unit you own into your hand from your Champion Zone or the board.', cost: EC(1), fx: [{ who: 'self', kind: 'teemoHome' }] }],
   'Yordle, Heart of the Tempest': [{ text: 'Give a unit [Assault 2] this turn.', cost: EC(0), action: true, disemp: true, fx: [T('assault', { n: 2 })] }],
-  // shortcut: the Bomb goes to base ([Deploy] gear on battlefields isn't modelled), its death effect is manual
-  'Yordle, Hexplosives Expert': [{ text: 'Play a Bomb gear token.', cost: EC(1, 1), fx: [{ who: 'self', kind: 'token', name: 'Bomb', n: 1 }] }],
+  'Yordle, Hexplosives Expert': [{ text: 'Play a Bomb gear token to a battlefield.', cost: EC(1, 1), fx: [{ who: 'self', kind: 'token', name: 'Bomb', n: 1 }] }],
   'Akali, Rogue Assassin': [{ text: "If it's your turn, move a friendly unit in a showdown to base and if I'm [Empowered], ready it.", cost: EC(0), action: true, useIf: 'myTurn', fx: [T('moveTo', { side: 'friendly', where: 'combat', to: 'base', readyIfEmp: true })] }],
   'Ekko, Boy Who Shattered Time': [
     { text: 'Empower me.', cost: EC(1), notEmp: true, fx: [{ who: 'self', kind: 'empowerMe' }] },
@@ -610,10 +628,49 @@ const AB_FLAGS = {
   'Zed, Master of Shadows': [{ disemp: true, other: false }],
 };
 
+// [Empowered] / [Level N] "I have ..." sentences: { emp, lv, might, kw, ready } ("[Level 3] I enter ready" too)
+const statCache = new Map();
+function statics(text) {
+  const key = text || '';
+  if (statCache.has(key)) return statCache.get(key);
+  const out = [], t = key.replace(/\([^)]*\)/g, '');
+  for (const m of t.matchAll(/\[(Empowered|Level (\d+))\]\s*\[(?:>|&gt;)\]\s*I (have|enter ready)([^.]*)\./g)) {
+    const rest = m[4] || '', mt = /\+(\d+) :rb_might:/.exec(rest);
+    out.push({ emp: m[1] === 'Empowered', lv: m[2] ? +m[2] : 0, might: mt && !/for each/.test(rest) ? +mt[1] : 0, kw: /\[/.test(rest) ? kw(rest) : null, ready: m[3] === 'enter ready' || /enter ready/.test(rest) });
+  }
+  statCache.set(key, out);
+  return out;
+}
+// [Deploy] gear: "Friendly units here have [X]"
+function deployKw(text) { const m = /Friendly units here have ((?:\[[^\]]+\]|\s|,|and)+)/.exec(text || ''); return m ? kw(m[1]) : null; }
+// [Show Off] <what>: reveal a matching card from your hand (or choose a friendly card) for a bonus
+function showOff(text) {
+  const m = /\[Show Off\] (?:a |an )?([^.]*)\./.exec((text || '').replace(/\([^)]*\)/g, ''));
+  if (!m) return null;
+  const w = m[1];
+  return /gear/i.test(w) ? 'Gear' : /\[Hidden\]/.test(w) ? 'hidden' : /Mech/.test(w) ? 'Mech' : /unit/i.test(w) ? 'Unit' : /:rb_energy_(\d+): or more/.test(w) ? 'e' + /:rb_energy_(\d+):/.exec(w)[1] : 'any';
+}
+// Deploy gear abilities, by event (its controller): play, conquer, hold, win (a combat here), attack (friendly units
+// attack here), endTurn (end of your turn while you control this battlefield)
+const DEPLOY_FX = {
+  'Blossoming Dreamroot': { win: [SELF({ kind: 'draw', n: 1 })] },
+  'Concert Poster': { play: [MAY('Payer 1 énergie pour un jeton Recruit dans votre base ?', [SELF({ kind: 'token', name: 'Recruit', n: 1 })], { pay: { e: 1, p: [] } })],
+    conquer: [MAY('Payer 1 énergie pour un jeton Recruit dans votre base ?', [SELF({ kind: 'token', name: 'Recruit', n: 1 })], { pay: { e: 1, p: [] } })] },
+  'Demacian Standard': { attack: [T('might', { n: 2, side: 'friendly', where: 'here' })], hold: [MAY('Reprendre Demacian Standard en main ?', [SELF({ kind: 'selfHand' })], { ai: false })] },
+  'Detonation Amplifier': { play: [MAY('Détruire une autre de vos unités pour piocher 1 ?', [T('kill', { side: 'friendly' }), SELF({ kind: 'draw', n: 1 })], { ai: false, cond: 'unitsAny' })] },
+  'Dockside Lock-Up': { play: [T('lockup', { where: 'here' })], hold: [SELF({ kind: 'lockupRelease' })] },
+  'Hunting Blind': { play: [T('moveTo', { side: 'enemy', to: 'here', opt: true, notHere: true })] },
+  'Pillaged Armory': { play: [SELF({ kind: 'buff' })], conquer: [SELF({ kind: 'buff' })] },
+  'Portable Portal': { play: [MAY('Payer 1 puissance Body pour redresser une unité ici ?', [T('ready', { where: 'here' })], { pay: { e: 0, p: [['Body']] }, cond: 'unitsHereAny' })] },
+  'Resource Extractor': { endTurn: [SELF({ kind: 'token', name: 'Gold', n: 1, ex: true })] },
+  'The Ball': { play: [SELF({ kind: 'ballChoice' })] },
+  'The Good Stuff': { hold: [SELF({ kind: 'selfHand' })] },
+};
+
 // "You may pay <cost> as an additional cost to play me"
 function extraCost(text) {
   const m = /You may pay ((?::rb_(?:energy_\d+|rune_\w+):)+) as an additional cost to play me/.exec(text || '');
   return m ? parseCost(m[1]) : null;
 }
 
-module.exports = { LEGEND_FX, extraCost, BF_FX, abilities, auras, triggerFx, CARD_FX, parseCost, kwCost, cardCost, sumCost, planCost, tokensIn, deathTokens, SYNTH_TOKENS, kw, spellFx, planPay, combat, domOf, playFx, entersReady };
+module.exports = { statics, deployKw, showOff, DEPLOY_FX, LEGEND_FX, extraCost, BF_FX, abilities, auras, triggerFx, CARD_FX, parseCost, kwCost, cardCost, sumCost, planCost, tokensIn, deathTokens, SYNTH_TOKENS, kw, spellFx, planPay, combat, domOf, playFx, entersReady };

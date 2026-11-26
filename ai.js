@@ -588,6 +588,13 @@ function phaseEquip(s, me, level) {
   const z = s.players[me].zones, acts = [], pool = runePool(s, me);
   const units = [...z.base, ...s.bfs.flatMap(b => b.units[me])].filter(c => isUnit(s, c)).sort((a, b) => (a.ex - b.ex) || G.hp(s, b) - G.hp(s, a));
   if (!units.length) return acts;
+  // [Empower]: a unit (or the legend) whose [Empowered] text helps, with Energy to spare
+  for (const c of [...z.base, ...z.legend, ...s.bfs.flatMap(b => b.units[me])]) {
+    const d = G.cd(s, c), cost = !c.emp && /\[Empower\]/.test(d.text || '') && R.kwCost(d.text, 'Empower');
+    if (!cost || level === 'easy' || !R.statics(d.text).some(x => x.emp)) continue;
+    const plan = R.planCost(pool, null, cost); if (!plan) continue;
+    spend(pool, plan); acts.push({ type: 'empower', iid: c.iid });
+  }
   for (const g of z.base.filter(c => !c.att && !c.anim && R.kw(G.cd(s, c).text).equip)) {
     const plan = R.planCost(pool, null, R.kwCost(G.cd(s, g).text, 'Equip') || { e: 0, p: [] });
     if (!plan) continue;

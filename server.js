@@ -270,6 +270,11 @@ http.createServer(async (req, res) => {
     if (p === '/api/decks' && req.method === 'POST') {
       const d = await body(req);
       if (!d || typeof d.name !== 'string' || !d.cards) return json(res, 400, { error: 'deck invalide' });
+      // [Unique]: only one card with that name in the deck (main, champion and sideboard together)
+      const byId = new Map((await loadCards()).map(c => [c.id, c])), per = {};
+      for (const z of ['main', 'champion', 'side']) for (const x of d.cards[z] || []) { const c = byId.get(x.id); if (c && /\[Unique\]/.test(c.text || '')) per[c.name] = (per[c.name] || 0) + (x.n || 0); }
+      const dup = Object.keys(per).find(n => per[n] > 1);
+      if (dup) return json(res, 400, { error: `[Unique] : une seule copie de ${dup} par deck.` });
       const decks = readDecks();
       d.id = d.id || Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       d.updated = Date.now();

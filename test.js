@@ -838,6 +838,71 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     const id = Z.hand[Z.hand.length - 1].iid;
     assert.ok(!Z.main.some(x => x.iid === id), 'not left in the deck');
   }
+  { // Cleave on an attacker in a showdown: +3 counted by the engine AND shown in the view (attacker / defender role)
+    const { s, P, O, Z, unit } = legendGame('Annie, Dark Child');
+    const a = unit('at'), d = unit('df', 0, O); s.bfs[0].units[O].push(...s.bfs[0].units[O].splice(0)); s.bfs[0].ctrl = O;
+    for (const n of ['Cleave', 'Shadow Fiend', 'Gustwalker']) s.cd[by(n).id] = by(n);
+    assert.equal(g.apply(s, { type: 'move', seat: P, iid: 'at', to: { bf: 0, side: P } }), null);
+    assert.ok(s.showdown && s.showdown.att === P, 'showdown opened by the attacker');
+    const before = g.viewFor(s, P).bfs[0].units[P].find(c => c.iid === 'at').m;
+    Z.hand.push({ iid: 'cl', cid: by('Cleave').id, owner: P, ex: false });
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'cl', targets: ['at'] }), null);
+    g.apply(s, { type: 'chainPass', seat: O }); g.apply(s, { type: 'chainResolve', seat: P });
+    const va = g.viewFor(s, P).bfs[0].units[P].find(c => c.iid === 'at'), vd = g.viewFor(s, P).bfs[0].units[O].find(c => c.iid === 'df');
+    assert.deepEqual([va.role, vd.role], ['a', 'd'], 'roles shown');
+    assert.equal(va.m, before + 3, 'Cleave: +3 shown while attacking');
+    assert.equal(g.hp(s, a, 'a'), va.m, 'and counted in combat');
+    // [Empowered][>] I have [Assault 3] only while Empowered; [Level 3][>] +1 and [Ganking]
+    const sf = { iid: 'sf', cid: by('Shadow Fiend').id, owner: P, ex: false, dmg: 0, buff: 0 }; Z.base.push(sf);
+    assert.equal(g.hp(s, sf, 'a'), by('Shadow Fiend').might, 'Shadow Fiend: no Assault while not Empowered');
+    sf.emp = true; assert.equal(g.hp(s, sf, 'a'), by('Shadow Fiend').might + 3, 'Assault 3 while Empowered');
+    const gw = { iid: 'gw', cid: by('Gustwalker').id, owner: P, ex: false, dmg: 0, buff: 0 }; Z.base.push(gw);
+    s.players[P].xp = 0; assert.equal(g.hp(s, gw), by('Gustwalker').might, 'Gustwalker below level 3');
+    s.players[P].xp = 3; assert.equal(g.hp(s, gw), by('Gustwalker').might + 1, 'Gustwalker level 3: +1');
+  }
+  { // [Deploy]: Banner of Conquest on a battlefield gives [Assault]; killed when the opponent holds there. Bombs.
+    const { s, P, O, Z, unit } = legendGame('Annie, Dark Child'); const u = unit('bu', 1);
+    for (const n of ['Banner of Conquest', 'Lonely Poro']) s.cd[by(n).id] = by(n);
+    Z.hand.push({ iid: 'ban', cid: by('Banner of Conquest').id, owner: P, ex: false });
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'ban', to: { bf: 1 } }), null);
+    assert.equal(g.find(s, 'ban').zone, 'bfgear', 'deployed on the battlefield');
+    const m0 = g.hp(s, u); assert.equal(g.hp(s, u, 'a'), m0 + 1, 'friendly units here have [Assault]');
+    s.bfs[1].units[P].splice(0); s.bfs[1].units[O].push({ iid: 'ou', cid: u.cid, owner: O, ex: false, dmg: 0, buff: 0 }); s.bfs[1].ctrl = O;
+    g.apply(s, { type: 'endTurn', seat: P });
+    assert.equal(g.find(s, 'ban').zone, 'trash', 'killed when the opponent holds there');
+  }
+  { // Bomb (Yordle, Hexplosives Expert): to a battlefield; when it dies, 2 to an enemy there; Lonely Poro dies alone
+    const { s, P, O, Z, unit } = legendGame('Yordle, Hexplosives Expert');
+    const e1 = unit('en', 0, O);
+    assert.equal(g.apply(s, { type: 'activate', seat: P, iid: 'lg', bf: 0 }), null);
+    while (s.pending && s.pending.kind === 'bf') g.apply(s, { type: 'resolve', seat: P, bf: 0 });
+    const bomb = (s.bfs[0].gear || {})[P] && s.bfs[0].gear[P][0];
+    assert.ok(bomb, 'Bomb deployed at the battlefield');
+    const d0 = e1.dmg || 0;
+    assert.equal(g.apply(s, { type: 'damage', seat: P, iid: bomb.iid, n: 9 }), null);
+    assert.ok(!g.find(s, 'en') || g.find(s, 'en').zone === 'trash' || (g.find(s, 'en').c.dmg || 0) === d0 + 2, 'the Bomb deals 2 to an enemy there');
+    const pz = legendGame('Annie, Dark Child');
+    pz.s.cd[by('Lonely Poro').id] = by('Lonely Poro');
+    pz.s.bfs[0].units[pz.P].push({ iid: 'lp', cid: by('Lonely Poro').id, owner: pz.P, ex: false, dmg: 0, buff: 0 });
+    const h0 = pz.Z.hand.length; g.apply(pz.s, { type: 'damage', seat: pz.P, iid: 'lp', n: 9 });
+    assert.equal(pz.Z.hand.length, h0 + 1, 'Lonely Poro: died alone, draw 1');
+  }
+  { // [Show Off]: Primordial Roar deals the Might of the unit shown; [Vision] granted by Gemcraft Seer
+    const { s, P, O, Z, unit } = legendGame('Annie, Dark Child'); const mine = unit('me'), en = unit('en2', 0, O);
+    for (const n of ['Primordial Roar', 'Gemcraft Seer']) s.cd[by(n).id] = by(n);
+    const body = all.find(c => c.name === 'Body Rune'); s.cd[body.id] = body;
+    for (let i = 0; i < 4; i++) Z.runes.push({ iid: 'br' + i, cid: body.id, owner: P, ex: false });
+    Z.hand.push({ iid: 'pr', cid: by('Primordial Roar').id, owner: P, ex: false });
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'pr', targets: ['en2'] }), null);
+    g.apply(s, { type: 'chainPass', seat: O }); g.apply(s, { type: 'chainResolve', seat: P });
+    assert.ok(s.log.some(l => /Show Off/.test(l.msg)), 'a card is shown');
+    const f = g.find(s, 'en2'); assert.ok(f.zone === 'trash' || f.c.dmg >= 1, 'damage equal to the shown Might');
+    Z.base.push({ iid: 'gs', cid: by('Gemcraft Seer').id, owner: P, ex: false, dmg: 0, buff: 0 });
+    const v = Z.main.find(x => g.cd(s, x).type === 'Unit' && !/\[Vision\]/.test(g.cd(s, x).text || '') && (g.cd(s, x).energy || 0) <= 3); Z.main.splice(Z.main.indexOf(v), 1); Z.hand.push(v);
+    Z.runes.forEach(r => (r.ex = false));
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: v.iid }), null);
+    assert.ok(s.log.some(l => /regarde la carte du dessus/.test(l.msg)), 'Vision granted: look at the top card');
+  }
   { // Orianna: start of the Main Phase, pay 1 to animate a gear
     const { s, P, O, Z } = legendGame('Orianna, Lady of Clockwork');
     const gear = all.find(c => c.type === 'Gear' && (c.energy || 0) >= 2 && !/\[Equip\]/.test(c.text || '')); s.cd[gear.id] = gear;

@@ -82,6 +82,13 @@ const sfx = (() => {
     card: () => play(t => { noise(t, 0.11, 0.03, 850); tone(190, t, 0.12, 0.035, 'sine', 95); }),
     turn: () => play(t => [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => tone(f, t + i * 0.07, 0.8, 0.026, 'triangle'))),
     score: () => play(t => [783.99, 1046.5, 1318.5].forEach((f, i) => tone(f, t + i * 0.08, 0.5, 0.035))),
+    // Baron Nashor: a deep rumble, a roar sweeping down, then a dark chord
+    baron: () => play(t => {
+      tone(55, t, 2.4, 0.09, 'sawtooth', 32); tone(82.4, t + 0.05, 2.2, 0.05, 'triangle', 41);
+      noise(t, 1.6, 0.05, 180); noise(t + 1.05, 0.9, 0.06, 420);
+      tone(392, t + 1.05, 0.6, 0.03, 'sawtooth', 98);
+      [110, 130.8, 164.8, 220].forEach((f, i) => tone(f, t + 1.15 + i * 0.05, 2.2, 0.035, 'triangle'));
+    }),
     start: () => play(t => { tone(196, t, 1.4, 0.045, 'triangle', 392); tone(293.7, t + 0.06, 1.4, 0.03, 'sine', 587.3); noise(t, 0.7, 0.015, 1400); }),
     toggle() { muted = !muted; store.set('mute', muted); return muted; },
     setVol(kind, v) { vol[kind] = v; store.set(kind === 'hover' ? 'volHover' : 'volAnim', v); },
@@ -668,6 +675,7 @@ function locate(iid) {
   for (let b = 0; b < v.bfs.length; b++) {
     if (v.bfs[b].card && v.bfs[b].card.iid === iid) return { c: v.bfs[b].card, bfCard: b };
     for (const p of ['p1', 'p2']) { const c = v.bfs[b].units[p].find(x => x.iid === iid); if (c) return { c, bf: b, side: p }; }
+    for (const p of ['p1', 'p2']) { const g = ((v.bfs[b].gear || {})[p] || []).find(x => x.iid === iid); if (g) return { c: g, bf: b, side: p, zone: 'bfgear' }; }
     const hc = (v.bfs[b].hidden || []).find(x => x.iid === iid); if (hc) return { c: hc, bf: b, side: hc.owner, zone: 'hidden', p: hc.owner };
   }
   return null;
@@ -746,7 +754,7 @@ function cardSig(c, faceDown) { return (faceDown || c.hidden || c.fd ? 'B' : c.c
 
 // equipment attached to a unit (gear stays in its controller's base with att = unit iid)
 const eqOn = c => ['p1', 'p2'].flatMap(p => S.v.players[p].zones.base.filter(g => g.att === c.iid));
-const mightShown = c => { const d = cardOf(c); return d && d.might != null && !c.fd ? d.might + (c.buff || 0) + (c.tb || 0) + eqOn(c).reduce((a, g) => a + ((cardOf(g) || {}).might || 0), 0) : 0; };
+const mightShown = c => { if (c.m != null) return c.m; const d = cardOf(c); return d && d.might != null && !c.fd ? d.might + (c.buff || 0) + (c.tb || 0) + eqOn(c).reduce((a, g) => a + ((cardOf(g) || {}).might || 0), 0) : 0; };
 // equipment drawn under its unit (it stays in its controller's base in the rules; shown there again once detached)
 const attachedShown = g => { if (!g.att) return false; const L = locate(g.att); return !!L && (L.zone === 'base' || L.bf != null); };
 function syncCard(c, faceDown, extraCls, zone) {
@@ -779,17 +787,79 @@ function syncCard(c, faceDown, extraCls, zone) {
   if (back || c.fd) { if (/hiddencard/.test(extraCls || '')) bd.append(h('span', { class: 'badge hid' }, T('CACHÉE'))); return el; }
   if (c.dmg) bd.append(h('span', { class: 'badge dmg' }, c.dmg));
   const eq = eqOn(c);
-  if ((c.buff || c.tb || eq.length) && data && data.might != null) bd.append(h('span', { class: 'badge might' }, '⚔' + mightShown(c)));
+  if ((c.buff || c.tb || eq.length || (c.m != null && c.m !== data.might)) && data && data.might != null) bd.append(h('span', { class: 'badge might' + (c.role ? ' ' + c.role : '') }, '⚔' + mightShown(c)));
+  el.classList.toggle('attacker', c.role === 'a'); el.classList.toggle('defender', c.role === 'd');
+  if (c.role) bd.append(h('span', { class: 'badge role ' + c.role }, T(c.role === 'a' ? 'ATTAQUANT' : 'DÉFENSEUR')));
+  if (c.ta) bd.append(h('span', { class: 'badge kwt' }, 'ASSAULT +' + c.ta));
+  if (c.ts) bd.append(h('span', { class: 'badge kwt' }, 'SHIELD +' + c.ts));
+  if (c.tt) bd.append(h('span', { class: 'badge kwt' }, 'TANK'));
+  if (c.tg) bd.append(h('span', { class: 'badge kwt' }, 'GANKING'));
   if (c.att && !attachedShown(c)) { const u = locate(c.att); bd.append(h('span', { class: 'badge equip' }, '⚙ ' + (u && cardOf(u.c) ? cardOf(u.c).name.split(',')[0] : 'attaché'))); }
   if (c.emp) bd.append(h('span', { class: 'badge emp' }, T('RENFORCÉE')));
   if (data && data.supertype === 'Token') el.classList.add('token');
   if (c.rev) bd.append(h('span', { class: 'badge rev' }, T('RÉVÉLÉE')));
   // [Mighty]: a unit with 5+ Might on the board
-  if (data && data.type === 'Unit' && (zone === 'base' || /^p[12]$/.test(zone)) && (data.might || 0) + (c.buff || 0) + (c.tb || 0) >= 5) bd.append(h('span', { class: 'badge mighty' }, T('PUISSANTE')));
+  if (data && data.type === 'Unit' && (zone === 'base' || /^p[12]$/.test(zone)) && mightShown(c) >= 5) bd.append(h('span', { class: 'badge mighty' }, T('PUISSANTE')));
   if (c.st) { bd.append(h('span', { class: 'badge stun' }, T('ÉTOURDI'))); el.classList.add('stun'); }
   return el;
 }
 
+// 3D entrance of Baron Nashor: the beast rises, the Baron Pit battlefield spins down onto a rune circle, a
+// shockwave and sparks, then the battlefield card flies to its place in the middle of the board
+function baronIntro(i) {
+  const v = S.v, b = v.bfs[i], pitData = cardOf(b.card);
+  const baron = ['p1', 'p2'].flatMap(p => b.units[p]).find(c => /Baron Nashor/.test((cardOf(c) || {}).name || ''));
+  const baronData = baron && cardOf(baron);
+  const slot = $(`[data-bf="${i}"]`);
+  if (slot) slot.classList.add('baron-wait');
+  const fast = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const canvas = h('canvas', { class: 'bx-sparks' });
+  const pitCard = h('div', { class: 'bx-pit' }, pitData ? cardView(pitData) : '');
+  const beast = baronData ? h('div', { class: 'bx-beast' }, cardView(baronData)) : '';
+  const fx = h('div', { class: 'baron-fx' + (fast ? ' fast' : '') },
+    h('div', { class: 'bx-vignette' }),
+    h('div', { class: 'bx-stage' },
+      h('div', { class: 'bx-floor' }, h('div', { class: 'bx-ring r1' }), h('div', { class: 'bx-ring r2' }), h('div', { class: 'bx-ring r3' })),
+      h('div', { class: 'bx-beams' }, ...Array.from({ length: 7 }, (_, k) => h('i', { style: `--a:${k * 51}deg;--d:${k * 0.07}s` }))),
+      beast, pitCard, h('div', { class: 'bx-shock' })),
+    canvas,
+    h('div', { class: 'bx-title' }, h('b', {}, 'Baron Nashor'), h('span', {}, T('Le Puits du Baron surgit au centre du champ de bataille'))));
+  document.body.append(fx);
+  sfx.baron();
+  const board = $('.board'); if (board && !fast) board.animate([{ transform: 'translate(0,0)' }, { transform: 'translate(-6px,4px)' }, { transform: 'translate(5px,-5px)' }, { transform: 'translate(-3px,2px)' }, { transform: 'translate(0,0)' }], { duration: 520, delay: 1050, easing: 'ease-out' });
+  // sparks: purple embers bursting from the impact, then drifting up
+  const ctx = canvas.getContext('2d'), W = (canvas.width = innerWidth), H = (canvas.height = innerHeight), parts = [];
+  const burst = () => { for (let k = 0; k < 160; k++) { const a = Math.random() * Math.PI * 2, sp = 2 + Math.random() * 9; parts.push({ x: W / 2, y: H * 0.52, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6 - 2, l: 1, r: 1 + Math.random() * 3, h: 265 + Math.random() * 50 }); } };
+  let t0 = performance.now(), burstDone = false;
+  const tick = now => {
+    if (!fx.isConnected) return;
+    const el = now - t0;
+    if (!burstDone && el > 1050) { burstDone = true; burst(); }
+    if (el < 1000 && Math.random() < 0.6) parts.push({ x: W / 2 + (Math.random() - 0.5) * 300, y: H * 0.75, vx: (Math.random() - 0.5) * 0.6, vy: -1.5 - Math.random() * 2, l: 1, r: 1 + Math.random() * 2, h: 280 });
+    ctx.clearRect(0, 0, W, H); ctx.globalCompositeOperation = 'lighter';
+    for (const p of parts) {
+      p.x += p.vx; p.y += p.vy; p.vy += 0.04; p.vx *= 0.985; p.l -= 0.011;
+      if (p.l <= 0) continue;
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 4);
+      g.addColorStop(0, `hsla(${p.h},100%,75%,${p.l})`); g.addColorStop(1, `hsla(${p.h},100%,50%,0)`);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 4, 0, Math.PI * 2); ctx.fill();
+    }
+    for (let k = parts.length - 1; k >= 0; k--) if (parts[k].l <= 0) parts.splice(k, 1);
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  // the battlefield card flies to its slot on the board, then the overlay fades out
+  const total = fast ? 900 : 3300;
+  setTimeout(() => {
+    const to = slot && slot.getBoundingClientRect(), from = pitCard.getBoundingClientRect();
+    if (to && from.width) {
+      const dx = to.left + to.width / 2 - (from.left + from.width / 2), dy = to.top + to.height / 2 - (from.top + from.height / 2), sc = Math.min(to.width / from.width, to.height / from.height);
+      pitCard.animate([{ transform: getComputedStyle(pitCard).transform }, { transform: `translate(${dx}px,${dy}px) scale(${sc})`, opacity: 0.2 }], { duration: 650, easing: 'cubic-bezier(.6,0,.3,1)', fill: 'forwards' });
+    }
+    fx.classList.add('out');
+  }, total);
+  setTimeout(() => { fx.remove(); if (slot) { slot.classList.remove('baron-wait'); slot.classList.add('baron-arrive'); setTimeout(() => slot.classList.remove('baron-arrive'), 1400); } }, total + 700);
+}
 function renderGame() {
   const v = S.v;
   const key = S.me + '|' + v.bfs.length + '|' + pname('p1') + pname('p2');
@@ -831,7 +901,7 @@ function renderGame() {
     for (const p of ['p1', 'p2']) fill(`bfh${i}:${p}`, (b.hidden || []).filter(c => c.owner === p), { cls: 'hiddencard' });
     $(`[data-bf="${i}"]`).classList.toggle('showdown', !!(v.showdown && v.showdown.bf === i));
     for (const p of ['p1', 'p2']) {
-      fill(`bf${i}:${p}`, b.units[p]);
+      fill(`bf${i}:${p}`, [...b.units[p], ...((b.gear || {})[p] || [])]);
       const ms = $(`[data-ms="${i}:${p}"]`);
       if (ms) ms.textContent = b.units[p].length ? '⚔ ' + b.units[p].reduce((a, c) => a + mightShown(c), 0) : '';
     }
@@ -852,6 +922,11 @@ function renderGame() {
   for (const [iid, el] of els) if (!seen.has(iid)) { el.remove(); els.delete(iid); }
 
   placeOpHand(); renderTracks();
+  // Baron Nashor just added the Baron Pit battlefield (not on a reload): the cinematic
+  const pit = v.bfs.findIndex(b => b.card && (cardOf(b.card) || {}).name === 'Baron Pit');
+  const bfKey = S.room + '|' + v.bfs.length;
+  if (pit >= 0 && S.bfSeen && S.bfSeen.room === S.room && S.bfSeen.n < v.bfs.length && S.baronDone !== v.bfs[pit].card.iid) { S.baronDone = v.bfs[pit].card.iid; baronIntro(pit); }
+  S.bfSeen = { room: S.room, n: v.bfs.length, key: bfKey };
   // FLIP: last, invert, play
   let moved = 0;
   for (const [iid, el] of els) {
@@ -1393,6 +1468,7 @@ function cardMenu(e, iid) {
       const b = S.v.bfs[i];
       return b.ctrl === S.me || (/\[Ambush\]|can be played to a battlefield/i.test(txt) && b.units[S.me].length) || (/where there are enemy units/i.test(txt) && b.units[other(S.me)].length);
     }).map(i => [`✦ Jouer sur ${bfName(i)}`, () => send({ type: 'play', iid, to: { bf: i } })]) : []),
+    ...(inHand && mine && d && /^\s*\[Deploy\]/.test(txt) ? S.v.bfs.map((b, i) => [`✦ Déployer sur ${bfName(i)}`, () => send({ type: 'play', iid, to: { bf: i } })]) : []),
     L.zone === 'chain' ? ['Contrer (vers la défausse)', () => mv(iid, { p: o, zone: 'trash', pos: 'top' })] : null,
     onBoard ? [c.ex ? 'Redresser' : 'Épuiser', () => send({ type: 'exhaust', iid }), 'Espace'] : null,
     L.zone === 'runes' ? ['Recycler la rune', () => send({ type: 'recycle', iid })] : null,
