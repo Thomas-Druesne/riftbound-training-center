@@ -1367,6 +1367,9 @@ function cardMenu(e, iid) {
   menu(e, d ? d.name : 'Carte cachée', [
     L.zone === 'hidden' && mine ? ['✦ Jouer la carte cachée (gratuit)', () => playCard(iid)] : null,
     inHand && HIDDEN_RE.test(txt) ? { sub: 'Cacher (payez 1 puissance)', items: myBfs.length ? myBfs.map(i => [bfName(i), () => send({ type: 'hide', iid, bf: i })]) : [['Ayez d’abord une unité sur un champ de bataille', () => {}]] } : null,
+    inHand && /as an additional cost to play me/.test(txt) ? (S.v.auto && S.v.auto[S.me]
+      ? ['✦ Jouer sans le coût additionnel', () => send({ type: 'play', iid, extra: false })]
+      : ['✦ Jouer avec le coût additionnel (payé à la main)', () => send({ type: 'play', iid, extra: true })]) : null,
     inHand && /\[Repeat\]/.test(txt) ? [`✦ Jouer avec Repeat (payez ${costLabel(txt, 'Repeat')} en plus)`, () => send({ type: 'play', iid, repeat: true })] : null,
     L.zone === 'trash' && mine && /\[Flow\]/.test(txt) ? [`✦ Jouer depuis la défausse (Flow : ${costLabel(txt, 'Flow')})`, () => { closeModal(); send({ type: 'play', iid, flow: true }); }] : null,
     onBoard && mine && d && d.type === 'Gear' && /\[Equip\]/.test(txt) ? (c.att ? ['Détacher l’équipement', () => send({ type: 'unequip', iid })]

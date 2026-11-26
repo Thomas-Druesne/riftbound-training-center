@@ -574,6 +574,27 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     g.apply(s, { type: 'chainPass', seat: other(P) }); g.apply(s, { type: 'chainResolve', seat: P });
     assert.equal(Z.main[Z.main.length - 1].iid, 'sw2', 'then recycled');
   }
+  { // Imperial Decree: 1 damage kills; Tactical Retreat: recalled instead of dying; Pyke pays its additional cost
+    const s = mk(), P = s.active, O = other(P), Z = s.players[P].zones;
+    for (const n of ['Imperial Decree', 'Tactical Retreat', 'Pyke, Dockside Butcher']) s.cd[by(n).id] = by(n);
+    s.auto = { p1: false, p2: false };
+    const take = (p, id) => { const z = s.players[p].zones, c = z.main.find(x => g.cd(s, x).type === 'Unit' && (g.cd(s, x).might || 0) >= 3); z.main.splice(z.main.indexOf(c), 1); c.iid = id; c.ex = false; return c; };
+    const a = take(P, 'ua'), b = take(O, 'ub'); s.bfs[0].units[P].push(a); s.bfs[1].units[O].push(b);
+    Z.hand.push(card(s, 'dec', 'Imperial Decree', P));
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'dec' }), null); g.apply(s, { type: 'chainPass', seat: O });
+    assert.equal(g.apply(s, { type: 'damage', seat: P, iid: 'ub', n: 1 }), null);
+    assert.equal(g.find(s, 'ub').zone, 'trash', 'Imperial Decree: 1 damage kills');
+    Z.hand.push(card(s, 'tr', 'Tactical Retreat', P));
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'tr', targets: ['ua'] }), null); g.apply(s, { type: 'chainPass', seat: O });
+    g.apply(s, { type: 'damage', seat: P, iid: 'ua', n: 9 });
+    assert.deepEqual([g.find(s, 'ua').zone, g.find(s, 'ua').c.ex], ['base', true], 'Tactical Retreat: healed, exhausted, recalled');
+    s.auto = { p1: true, p2: true }; Z.runes.forEach(r => (r.ex = false));
+    const fury = all.find(c => c.name === 'Fury Rune'); s.cd[fury.id] = fury;
+    while (Z.runes.length < 8) Z.runes.push({ iid: 'fr' + Z.runes.length, cid: fury.id, owner: P, ex: false });
+    Z.hand.push(card(s, 'pk', 'Pyke, Dockside Butcher', P));
+    assert.equal(g.apply(s, { type: 'play', seat: P, iid: 'pk' }), null);
+    assert.ok(!g.find(s, 'pk').c.ex && g.hp(s, g.find(s, 'pk').c) === (by('Pyke, Dockside Butcher').might || 0) + 2, 'Pyke: additional cost paid, ready and +2');
+  }
   { // Baron Nashor: 10 energy + 3 Chaos power from 12 runes (a rune exhausted for energy can then be recycled
     // for power); it adds Baron Pit and enters there; enemy spells can't choose it
     const s = mk(), P = s.active, Z = s.players[P].zones, rune = all.find(c => c.name === 'Chaos Rune');

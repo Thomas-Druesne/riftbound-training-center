@@ -188,6 +188,33 @@ Object.assign(CARD_FX, {
   'Undying Loyalty': [{ who: 'self', kind: 'pick', from: 'trash', filter: { types: ['Unit'], maxE: 2, maxP: 1 }, then: 'playFree' }],
   'Temptation': [T('moveTo', { side: 'enemy' })],
   'Shakedown': [T('dmg', { n: 6, side: 'enemy' })],
+  // "You may pay ... as an additional cost to play me. When you play me, if you paid the additional cost, ..."
+  'Pyke, Dockside Butcher': [T('ready', { self: true, cond: 'paidExtra' }), T('might', { n: 2, self: true, cond: 'paidExtra' })],
+  'Blast Corps Cadet': [T('dmg', { n: 2, where: 'bf', cond: 'paidExtra' })],
+  'Sea Monkey': [{ who: 'self', kind: 'buff', me: true, cond: 'paidExtra' }],
+  'Gust Monk': [T('assault', { n: 2, cond: 'paidExtra' })],
+  'Akshan, Mischievous': [T('steal', { gear: true, side: 'enemy', cond: 'paidExtra' })],
+  'Imperial Decree': [{ who: 'self', kind: 'decree' }],
+  'Tactical Retreat': [T('retreat', { side: 'friendly' })],
+  'Alpha Strike': [T('alpha', { side: 'friendly' })],
+  'Fox-Fire, Ahri': [{ who: 'self', kind: 'foxfire' }],
+  'Stormbringer, Volibear': [T('storm', { side: 'friendly', where: 'base' })],
+  'Hostile Takeover': [T('takeover', { side: 'enemy', where: 'bf' })],
+  'Mirror Image': [T('mirror', {})],
+  'Keeper of Masks': [{ who: 'self', kind: 'copiesOfMe', n: 2 }],
+  "Dragon's Rage, Lee Sin": [T('moveTo', { side: 'enemy', markMoved: true }), T('duel', { side: 'enemy', atMark: true })],
+  'Friendship': [T('might', { n: 1, perTags: ['Bird', 'Cat', 'Dog', 'Poro'] })],
+  'Bullet Time, Miss Fortune': [{ who: 'self', kind: 'bulletTime' }],
+  'Void Rush': [{ who: 'self', kind: 'draw', n: 2 }],
+  'Guerilla Warfare, Teemo': [1, 2].map(() => ({ who: 'self', kind: 'pick', from: 'trash', filter: { hidden: true }, then: 'hand' })).concat([{ who: 'self', kind: 'freeHide' }]),
+  'Sanction': [T('empTurn', {})],
+  'Tornado Warrior': [T('empTurn', { where: 'here', ifHidden: true, opt: true })],
+  'Raging Firebrand': [{ who: 'self', kind: 'spellDisc', n: 5 }],
+  'Wuju Apprentice': [{ who: 'self', kind: 'draw', n: 1, cond: 'xp6' }],
+  'Gutter Guardian': [{ who: 'self', kind: 'add', cost: { e: 0, p: [null] }, cond: 'showHidden' }],
+  'The Empyrean': [{ who: 'self', kind: 'draw', n: 2, cond: 'hand' }],
+  'Forgotten Relic': [{ who: 'self', kind: 'burn', n: 1 }],
+  'Jayce, Brilliant Inventor': [T('ready', { notSelf: true, opt: true })],
   'Elnuk Herd': [T('might', { n: 3, side: 'friendly', notSelf: true }), { who: 'self', kind: 'recycleSelf', ifHidden: true }],
   'Blitzcrank, Impassive': [T('moveTo', { side: 'enemy', to: 'here', opt: true, notHere: true })],
   'Walking Roost': [{ kind: 'token', who: 'opp', name: 'Bird', n: 1 }],
@@ -291,6 +318,7 @@ const TRIGGER = {
   playSpell: /When you play a spell,\s*/i, playUnit: /When you play a unit,\s*/i, allyDies: /When (?:another|a) friendly unit dies,\s*/i, deathknell: /\[Deathknell\]\s*(?:—|\[(?:>|&gt;)\])?\s*/i,
 };
 const TRIG_FX = {
+  'Lucian, Merciless': { conquer: [T('ready', { self: true })] },
   'Irresistible Faefolk': { move: [T('moveTo', { side: 'enemy', to: 'here', opt: true, notHere: true })] },
 };
 function triggerFx(card, ev) {
@@ -498,4 +526,10 @@ const BF_FX = {
   "Bandle Scouts' Academy": { hide: [SELF({ kind: 'token', name: 'Gold', n: 1, ex: true })] },
 };
 
-module.exports = { BF_FX, abilities, auras, triggerFx, CARD_FX, parseCost, kwCost, cardCost, sumCost, planCost, tokensIn, deathTokens, SYNTH_TOKENS, kw, spellFx, planPay, combat, domOf, playFx, entersReady };
+// "You may pay <cost> as an additional cost to play me"
+function extraCost(text) {
+  const m = /You may pay ((?::rb_(?:energy_\d+|rune_\w+):)+) as an additional cost to play me/.exec(text || '');
+  return m ? parseCost(m[1]) : null;
+}
+
+module.exports = { extraCost, BF_FX, abilities, auras, triggerFx, CARD_FX, parseCost, kwCost, cardCost, sumCost, planCost, tokensIn, deathTokens, SYNTH_TOKENS, kw, spellFx, planPay, combat, domOf, playFx, entersReady };

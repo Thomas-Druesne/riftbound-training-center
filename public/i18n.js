@@ -65,6 +65,7 @@ const EN = {
   'conquête': 'conquer', 'tenir': 'hold', 'défense': 'defend', 'combat': 'combat', 'début de tour': 'beginning phase', 'premier tour': 'first turn', 'carte cachée': 'hidden card',
   'Rockfall Path : aucune unité ne peut y être jouée.': 'Rockfall Path: units can’t be played here.',
   'À vous de répondre': 'Your response', 'Équiper un de vos équipements à cette unité (Weaponmaster) ?': 'Attach one of your Equipment to this unit (Weaponmaster)?',
+  '✦ Jouer sans le coût additionnel': '✦ Play without the additional cost', '✦ Jouer avec le coût additionnel (payé à la main)': '✦ Play with the additional cost (paid by hand)',
   'Son': 'Sound', 'Options': 'Options', 'Force adverse ici': 'Enemy Might here', 'Votre force ici': 'Your Might here', 'Buff': 'Buff',
   // stack, prompts
   'champ de bataille': 'battlefield', ' (la vôtre)': ' (yours)', 'Son effet s’applique à la résolution.': 'Its effect applies on resolution.',

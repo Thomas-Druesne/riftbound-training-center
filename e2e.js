@@ -20,6 +20,8 @@ function human(v, me) {
     const q = v.pending; if (q.to !== me) return null;
     if (q.kind === 'bf') return { type: 'resolve', bf: q.opts[0] };
     if (q.kind === 'predict') return { type: 'resolve', iids: [] };
+    if (q.kind === 'pick') return { type: 'resolve', iids: q.cards.slice(0, 1) };
+    if (q.kind === 'confirm') return { type: 'resolve', yes: true };
     if (q.kind === 'target') return { type: 'resolve', iids: q.opt ? [] : [q.opts[0]] };
     if (q.kind === 'discard') return { type: 'resolve', iids: z.hand.slice(0, q.n).map(c => c.iid) };
     const mine = [...z.base, ...v.bfs.flatMap(b => b.units[me])].filter(c => (byId[c.cid] || {}).type === 'Unit' && c.iid !== q.exclude);
