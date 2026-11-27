@@ -989,7 +989,13 @@ function renderPregame() {
     if (S.diceShownFor !== S.room) { S.diceShownFor = S.room; S.diceAnim = { until: Date.now() + 3600 }; setTimeout(() => S.v && renderPregame(), 3650); return renderDiceRoll(P, v); }
   }
   if (rolling) return;
-  if (v.stage === 'main' && v.pending && v.pending.to === S.me) return renderPrompt(P, v);
+  if (v.stage === 'main' && v.pending && v.pending.to === S.me) {
+    const before = P.dataset.key; renderPrompt(P, v);
+    if (P.dataset.key !== before) P.classList.remove('peek'); // a new choice always shows itself first
+    if (!P.querySelector('.peek-btn')) P.append(h('button', { class: 'btn peek-btn', onclick: () => { P.classList.toggle('peek'); peekLabel(P); } }));
+    return peekLabel(P);
+  }
+  P.classList.remove('peek');
   if (v.stage === 'main' || !v.stage) { P.classList.remove('show'); P.innerHTML = ''; P.dataset.key = ''; return; }
   const me = S.me, op = other(me), wait = t => h('div', { class: 'pg-wait' }, h('div', { class: 'spinner' }), t);
   const key = [v.stage, v.bfPick && v.bfPick[me], v.dice && v.dice.call, v.players[me].mullDone, v.players[me].mullNew, v.players[me].zones.hand.map(c => c.iid).join()].join('|');
@@ -1050,6 +1056,8 @@ function renderPregame() {
 }
 // A card asks this player to choose: discard N cards from hand, or destroy one of their units.
 S.pick = new Set();
+// "Voir le plateau": hide the choice screen to look at the board, then come back to it
+function peekLabel(P) { const b = P.querySelector('.peek-btn'); if (b) b.textContent = P.classList.contains('peek') ? '↩ ' + T('Revenir au choix') : '👁 ' + T('Voir le plateau'); }
 function renderPrompt(P, v) {
   const q = v.pending, me = S.me, fx = q.fx || {};
   if (q.kind === 'mode') { // "Choose one / two"
