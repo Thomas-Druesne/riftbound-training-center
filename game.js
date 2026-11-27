@@ -2004,7 +2004,7 @@ function act(s, a, who) {
 }
 
 // What a given seat is allowed to see.
-function viewFor(s, seat) {
+function viewFor(s, seat, showHand) { // showHand: a seat whose hand is shown anyway (training against the AI)
   const { history, ...v } = JSON.parse(JSON.stringify({ ...s, history: [] }));
   v.canUndo = s.history.length > 0;
   v.youAre = seat;
@@ -2012,7 +2012,7 @@ function viewFor(s, seat) {
   const hide = c => ({ iid: c.iid, owner: c.owner, hidden: true, ex: c.ex });
   for (const p of SEATS) {
     const z = v.players[p].zones;
-    if (!sees(p)) z.hand = z.hand.map(c => (c.rev ? c : hide(c)));
+    if (!sees(p) && p !== showHand) z.hand = z.hand.map(c => (c.rev ? c : hide(c)));
     for (const k of HIDDEN_ZONES) if (!sees(p)) z[k] = z[k].map(hide);
     for (const k of ZONES) if (k !== 'hand' && !sees(p)) z[k] = z[k].map(c => (c.fd ? hide(c) : c));
   }

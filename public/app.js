@@ -129,6 +129,7 @@ function openOptions() {
         const note = prompt(T('Que se passe-t-il ? (facultatif)')) || '';
         try { const r = await api('/api/report', { body: { room: S.room, seat: S.seat, note } }); closeModal(); toast(T('Rapport enregistré : ') + r.file); } catch (e) { toast(e.message); }
       } }, '⚑ ' + T('Signaler'))) : null,
+    h('label', { class: 'opt-mute', title: T('Entraînement : les cartes en main de l’IA sont montrées face visible.') }, h('input', { type: 'checkbox', checked: store.get('aiHand', false), onchange: e => { store.set('aiHand', e.target.checked); if (S.room) connect(S.room, S.seat); } }), T('Voir la main de l’IA')),
     h('label', { class: 'opt-mute' }, h('input', { type: 'checkbox', checked: sfx.muted, onchange: () => { const m = sfx.toggle(); $$('.mute:not(.opt)').forEach(x => (x.innerHTML = SPEAKER(m))); } }), T('Couper tous les sons')),
     h('div', { class: 'row' }, h('button', { class: 'btn gold', onclick: closeModal }, T('Fermer')))));
 }
@@ -475,7 +476,7 @@ function connect(room, seat) {
   if (es) es.close();
   es = null;
   if (!room) return;
-  es = new EventSource(`/api/events?room=${encodeURIComponent(room)}&seat=${seat}`);
+  es = new EventSource(`/api/events?room=${encodeURIComponent(room)}&seat=${seat}${store.get('aiHand', false) ? '&aihand=1' : ''}`);
   es.onmessage = ev => onState(JSON.parse(ev.data));
 }
 const isSeated = () => ['p1', 'p2', 'solo'].includes(S.seat);

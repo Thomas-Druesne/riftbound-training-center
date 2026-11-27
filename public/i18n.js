@@ -117,7 +117,7 @@ const EN = {
   'cartes': 'cards', 'Deck d’origine': 'Original deck', 'Retour': 'Back', 'Partie terminée': 'Game over',
   'Langue': 'Language', 'Français': 'Français', 'English': 'English', 'Volume des animations': 'Animation volume', 'Volume du survol': 'Hover volume',
   'Sons des cartes, des tours, des points et des clics.': 'Card, turn, point and click sounds.', 'Petit son au passage de la souris sur les boutons.': 'Small sound when the mouse passes over buttons.',
-  'Couper tous les sons': 'Mute all sounds', 'La page se recharge pour changer de langue.': 'The page reloads to change the language.',
+  'Couper tous les sons': 'Mute all sounds', 'Voir la main de l’IA': 'Show the AI’s hand', 'Entraînement : les cartes en main de l’IA sont montrées face visible.': 'Training: the AI’s hand cards are shown face up.', 'La page se recharge pour changer de langue.': 'The page reloads to change the language.',
   // engine errors
   'Affrontement en cours : seules les cartes [Action] ou [Reaction] se jouent.': 'Showdown in progress: only [Action] or [Reaction] cards can be played.',
   'Cacher coûte 1 puissance (n’importe quel domaine) : recyclez une rune.': 'Hiding costs 1 power (any domain): recycle a rune.', 'Carte introuvable dans la main': 'Card not found in hand',

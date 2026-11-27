@@ -945,6 +945,10 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     assert.equal(g.find(G2.s, 'wg').zone, 'hand', 'Wind and Ghosts: 4 Might returns to hand');
     assert.ok(g.find(G2.s, 'wg').c.rev, 'the returned card stays revealed');
     assert.ok(!g.viewFor(G2.s, G2.P).players[G2.O].zones.hand.find(c => c.iid === 'wg').hidden, 'the opponent sees it');
+    { const oh = G2.s.players[G2.O].zones.hand; oh.forEach(c => (c.rev = false));
+      assert.ok(g.viewFor(G2.s, G2.P).players[G2.O].zones.hand.every(c => c.hidden), 'opponent hand hidden by default');
+      assert.ok(g.viewFor(G2.s, G2.P, G2.O).players[G2.O].zones.hand.every(c => c.cid && !c.hidden), '"Voir la main de l’IA" shows it');
+      assert.ok(g.viewFor(G2.s, G2.P, G2.O).players[G2.O].zones.main.every(c => c.hidden), 'the deck stays hidden'); }
     G2 = sig('Wind and Ghosts'); const ws = G2.unit('ws', 0, G2.O); ws.tb = 3 - g.hp(G2.s, ws); cast(G2, ['ws']);
     assert.equal(g.find(G2.s, 'ws').zone, 'banish', 'Wind and Ghosts: 3 Might is banished');
     // Irresistible Faefolk: pulls an enemy when it moves to a battlefield, not when it goes back to base

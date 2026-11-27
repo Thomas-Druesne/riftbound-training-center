@@ -130,7 +130,8 @@ function broadcast(r) {
   // each player also gets their own current deck list (sideboarding between games)
   for (const c of r.clients) {
     const d = r.decks[c.seat], mine = d && { name: d.name, cards: d.cards, base: m.base[c.seat] };
-    c.res.write(`data: ${JSON.stringify({ ...game.viewFor(r.state, c.seat), ...extra, myDeck: mine })}\n\n`);
+    // "Voir la main de l'IA" (Options): only ever the AI's hand, never a human opponent's
+    c.res.write(`data: ${JSON.stringify({ ...game.viewFor(r.state, c.seat, c.aiHand && r.ai ? r.ai.seat : null), ...extra, myDeck: mine })}\n\n`);
   }
 }
 // match score (BO1 / BO3): a game counts once; an undo that removes the win removes it from the score too
@@ -338,7 +339,7 @@ http.createServer(async (req, res) => {
       const seat = url.searchParams.get('seat') || 'spec', r = rooms.get(url.searchParams.get('room'));
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       if (!r) { res.write(`data: ${JSON.stringify({ phase: 'none' })}\n\n`); return res.end(); }
-      const c = { res, seat };
+      const c = { res, seat, aiHand: url.searchParams.get('aihand') === '1' };
       r.clients.add(c); r.seen = Date.now();
       broadcast(r);
       const ping = setInterval(() => res.write(': ping\n\n'), 20000);
