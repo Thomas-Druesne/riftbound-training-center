@@ -2,7 +2,7 @@
 
 Simulateur local du jeu de cartes Riftbound : partie contre une IA (adversaire débutant / adversaire confirmé / Pro Player) ou contre un joueur (même PC ou réseau local), en BO1 ou en BO3 avec sideboard entre les manches. Interface en français ou en anglais (Options ⚙, avec les volumes des sons).
 
-Niveaux de l'IA : le débutant joue de façon gloutonne, le confirmé cherche la meilleure attaque et dépense ses runes au mieux, le Pro Player simule en plus chaque tour (plusieurs plans de tour et plusieurs attaques, joués deux tours plus loin sur des copies de la partie où la main adverse est tirée au hasard) et garde le meilleur.
+Niveaux de l'IA : le débutant joue de façon gloutonne, le confirmé cherche la meilleure attaque et dépense ses runes au mieux, le Pro Player simule en plus chaque tour (plusieurs plans de tour, plusieurs attaques dont les plus agressives, et avant chaque carte jouée plusieurs choix de carte, joués deux tours plus loin sur des copies de la partie où la main adverse est tirée au hasard) et garde le meilleur.
 
 ## Lancer
 

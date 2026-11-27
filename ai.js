@@ -523,24 +523,30 @@ function phaseMain(s, me, level) {
   let pick = best(null);
   if (reserve && !list.some(x => x.d === reserve)) { const kept = best(reserve); if (pick.v - kept.v < 1) pick = kept; }
   if (!pick.set.length) return [];
-  const x = pick.set.sort((a, b) => a.pri - b.pri || (b.d.energy || 0) - (a.d.energy || 0))[0];
-  if (x.hide != null) return [{ type: 'hide', iid: x.c.iid, bf: x.hide }];
-  if (x.ability != null) return [{ type: 'activate', iid: x.c.iid, k: x.ability, targets: x.plan.targets, ...(x.plan.bf != null ? { bf: x.plan.bf } : {}) }];
-  const act = { type: 'play', iid: x.c.iid, targets: x.plan.targets };
-  if (x.plan.bf != null) act.bf = x.plan.bf;
-  if (x.d.type === 'Unit' && R.kw(x.d.text).toEnemyBf) {
-    const m = model(s, me);
-    let best = null;
-    s.bfs.forEach((b, i) => {
-      if (!b.units[op].length || b.units[me].length || noUnitsHere(s, i)) return;
-      const t = clone(m); t.bfs[i].u[me].push(unitOf(s, x.c, me));
-      const v = fightValue(t, i, me, me);
-      if (v > 2 && (!best || v > best.v)) best = { v, i };
-    });
-    if (best) act.to = { bf: best.i };
+  const first = pick.set.sort((a, b) => a.pri - b.pri || (b.d.energy || 0) - (a.d.energy || 0))[0];
+  if (level !== 'pro' || SIM) return actOf(first);
+  // pro: the heuristic's card, the other good cards and "go to combat now", each played out on guessed copies
+  const alts = [actOf(first), ...list.filter(y => y !== first && afford(s, me, [y])).slice(0, 3).map(actOf), []];
+  return proMain(s, me, alts);
+  function actOf(x) {
+    if (x.hide != null) return [{ type: 'hide', iid: x.c.iid, bf: x.hide }];
+    if (x.ability != null) return [{ type: 'activate', iid: x.c.iid, k: x.ability, targets: x.plan.targets, ...(x.plan.bf != null ? { bf: x.plan.bf } : {}) }];
+    const act = { type: 'play', iid: x.c.iid, targets: x.plan.targets };
+    if (x.plan.bf != null) act.bf = x.plan.bf;
+    if (x.d.type === 'Unit' && R.kw(x.d.text).toEnemyBf) {
+      const m = model(s, me);
+      let best = null;
+      s.bfs.forEach((b, i) => {
+        if (!b.units[op].length || b.units[me].length || noUnitsHere(s, i)) return;
+        const t = clone(m); t.bfs[i].u[me].push(unitOf(s, x.c, me));
+        const v = fightValue(t, i, me, me);
+        if (v > 2 && (!best || v > best.v)) best = { v, i };
+      });
+      if (best) act.to = { bf: best.i };
+    }
+    if (x.d.type === 'Unit' && x.cost !== FREE && R.kw(x.d.text).accelerate) act.accel = afford(s, me, [{ ...x.d, energy: (x.d.energy || 0) + 1, power: (x.d.power || 0) + 1 }]);
+    return [act];
   }
-  if (x.d.type === 'Unit' && x.cost !== FREE && R.kw(x.d.text).accelerate) act.accel = afford(s, me, [{ ...x.d, energy: (x.d.energy || 0) + 1, power: (x.d.power || 0) + 1 }]);
-  return [act];
 }
 
 /* ---------------- driver ---------------- */
@@ -846,11 +852,15 @@ function evalState(s, me) {
 }
 // play my turn with a plan, the opponent's turn, then my next turn (both sides 'hard'), and score the result
 // the best few attacks, each played out on guessed copies of the game
-const BUDGET = 1200; // ms of look-ahead per decision at most
+const BUDGET = 2000; // ms of look-ahead per decision at most
 function proAttack(s, me, m) {
   const key = me + '|' + s.turn + '|' + s.rev;
   if (proAttack.key === key) return proAttack.moves;
-  const cands = searchAttack(m, me, 4);
+  const cands = searchAttack(m, me, 4), seen = new Set(cands.map(x => JSON.stringify(x.moves)));
+  const ready = m.base[me].filter(u => u.ready && u.m > 0);
+  for (const moves of [greedyAttack(clone(m), me), ...m.bfs.map((b, i) => ready.map(u => ({ iid: u.iid, to: i })))]) {
+    const k = JSON.stringify(moves); if (moves.length && !seen.has(k)) { seen.add(k); cands.splice(1, 0, { moves }); }
+  }
   if (cands.length < 2) return cands[0] ? cands[0].moves : [];
   const guesses = Array.from({ length: 5 }, () => guess(s, me)), t0 = Date.now();
   let best = null;
@@ -867,6 +877,25 @@ function proAttack(s, me, m) {
   }
   proAttack.key = key; proAttack.moves = best.moves;
   return best.moves;
+}
+function proMain(s, me, alts) {
+  const key = me + '|' + s.turn + '|' + s.rev;
+  if (proMain.key === key) return proMain.acts;
+  const guesses = Array.from({ length: 4 }, () => guess(s, me)), t0 = Date.now();
+  let best = null;
+  for (const acts of alts) {
+    if (best && Date.now() - t0 > BUDGET) break;
+    let v = 0, n = 0;
+    for (const g0 of guesses) {
+      const c = structuredClone(g0);
+      if (acts.length && G.apply(c, { ...acts[0], seat: me, p: me })) { v = -Infinity; break; } // not legal in the copy
+      v += rollout(c, me, { turn: c.turn, phase: acts.length ? 2 : 3, q: [], main: 1, att: 0 }, PLAN); n++;
+    }
+    if (n) v /= n;
+    if (!best || v > best.v + 0.01) best = { v, acts };
+  }
+  proMain.key = key; proMain.acts = best.acts;
+  return best.acts;
 }
 function rollout(c, me, mem, plan) {
   SIM++;

@@ -1195,7 +1195,7 @@ function setup(s, a) {
   const byId = {};
   for (const c of [...a.cards, ...R.SYNTH_TOKENS]) byId[c.id] = c;
   s.cd = {};
-  s.bfOpts = {};
+  s.bfOpts = {}; s.bfUsed = {};
   s.winner = null;
   s.players = { p1: newPlayer(), p2: newPlayer() };
   s.bfs = [];
@@ -1227,7 +1227,8 @@ function setup(s, a) {
     // BO3: one battlefield per match, those picked in earlier games are out (all of them out: no limit)
     const used = ((a.usedBf || {})[p]) || [], left = opts.filter(id => !used.includes(id));
     s.bfOpts[p] = left.length ? left : opts;
-    for (const id of s.bfOpts[p]) s.cd[id] = keep(byId[id]);
+    s.bfUsed[p] = left.length ? opts.filter(id => used.includes(id)) : []; // shown greyed on the pick screen
+    for (const id of opts) s.cd[id] = keep(byId[id]);
   }
   // pre-game: battlefield pick -> parity call + die roll -> simultaneous mulligan
   s.stage = 'bf';
@@ -1240,7 +1241,7 @@ function setup(s, a) {
   s.log = [];
   s.phase = 'playing';
   log(s, 'Choix des champs de bataille : chaque joueur en choisit un parmi les 3 de son deck.');
-  for (const p of SEATS) if (s.bfOpts[p].length <= 1) s.bfPick[p] = s.bfOpts[p][0] || 'none';
+  for (const p of SEATS) if (s.bfOpts[p].length <= 1 && !(s.bfUsed[p] || []).length) s.bfPick[p] = s.bfOpts[p][0] || 'none'; // with greyed ones, the screen still shows
   afterBfPick(s);
   return null;
 }

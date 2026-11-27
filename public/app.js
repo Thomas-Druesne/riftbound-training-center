@@ -1006,8 +1006,9 @@ function renderPregame() {
     const mine = v.bfPick[me];
     body = [h('div', { class: 'pg-step' }, 'Étape 1 sur 3'), h('h2', {}, 'Choisissez votre champ de bataille'),
       h('p', {}, mine ? `Votre choix est fait. ${pname(op)} choisit le sien…` : 'Parmi les champs de bataille de votre deck, choisissez celui qui sera en jeu.'),
-      h('div', { class: 'pg-cards' }, v.bfOpts[me].map(cid => {
+      h('div', { class: 'pg-cards' }, [...v.bfOpts[me], ...((v.bfUsed || {})[me] || [])].map(cid => {
         const el = cardView(S.byId[cid], { cls: mine === cid ? 'picked' : '' });
+        if (!v.bfOpts[me].includes(cid)) { el.classList.add('nopick'); el.title = T('Déjà joué dans ce match'); el.append(h('div', { class: 'used-tag' }, T('Déjà joué dans ce match'))); el.onmouseenter = () => showPreview(S.byId[cid]); return el; }
         el.onmouseenter = () => showPreview(S.byId[cid]);
         if (!mine) el.onclick = () => send({ type: 'chooseBf', cid });
         return el;

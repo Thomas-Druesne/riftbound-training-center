@@ -882,3 +882,6 @@ body.dragging-hidden .bf .bfhidden.me:empty::after { content: '?'; margin: auto;
 .pregame.peek .pg { visibility: hidden; }
 .pregame.peek .peek-btn { pointer-events: auto; box-shadow: 0 0 0 2px var(--gold2), 0 0 24px #f5c84b88; }
 .pregame.peek .peek-btn { opacity: .7; } .pregame.peek .peek-btn:hover { opacity: 1; }
+/* BO3: a battlefield already played this match, greyed on the pick screen */
+.pg-cards .card { position: relative; }
+.pg-cards .card .used-tag { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-8deg); padding: 6px 14px; border: 2px solid var(--gold2); border-radius: 4px; background: #02060bd9; color: var(--gold2); font-family: var(--f-title); font-weight: 800; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
