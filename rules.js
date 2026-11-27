@@ -119,7 +119,7 @@ const CARD_FX = {
   'Twilight Step': [T('recall', { where: 'bf', max: 3 })],
   'Unchecked Power': [{ kind: 'exhaustAll' }, { kind: 'aoeAll', n: 12, scope: 'bf', side: 'all' }],
   'Vault Breaker': [T('assault', { n: 2 })],
-  'Wind and Ghosts': [T('hand', { where: 'bf' })],
+  'Wind and Ghosts': [T('hand', { where: 'bf', banishMax: 3 })],
   'Invert Timelines': [{ kind: 'wheel', n: 4 }],
   'Shuriken Flip': [T('dmg', { n: 2, side: 'enemy', where: 'bf', opt: true }), T('moveTo', { side: 'friendly' })],
   'Skyward Strike': [T('recall', { side: 'enemy', where: 'bf' })],

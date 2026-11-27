@@ -305,6 +305,7 @@ function trigger(s, c, ev, p, bf) {
   if (cd(s, c).type === 'Unit') for (const g of gearOn(s, c)) trigger(s, g, ev, p, bf); // gear only: no loop
   const d = cd(s, c), fx = R.triggerFx(d, ev);
   if (!fx.length) return;
+  if (ev === 'move' && bf == null && /When I move to a battlefield/i.test(d.text || '')) return;
   log(s, `↳ ${d.name} (${EV[ev] || ev}) : capacité déclenchée.`);
   (s.fxQueue || (s.fxQueue = [])).push(...fx.map(e => ({ ...e, by: p, card: d.name, src: c.iid, bfAt: bf })));
   if (!s.fxRun) runFx(s);
@@ -417,6 +418,18 @@ function abilityCost(s, p, ab) {
   return { ...ab.cost, e: Math.max(0, ab.cost.e - n) };
 }
 // Fiora: "when one of your units becomes [Mighty]"
+// A card both players have seen stays revealed once back in a hand (returned from the board, the trash, the stack...);
+// it becomes secret again only when it goes back into a deck.
+function revealWatch(s) {
+  const pub = [...(s.chain || []), ...s.bfs.flatMap(b => [...b.units.p1, ...b.units.p2, ...(b.gear ? [...(b.gear.p1 || []), ...(b.gear.p2 || [])] : [])])];
+  for (const p of SEATS) { const z = s.players[p].zones; pub.push(...z.base, ...z.legend, ...z.champion, ...z.trash, ...z.banish); }
+  for (const c of pub) if (c && !c.fd) c.pub = true;
+  for (const p of SEATS) {
+    const z = s.players[p].zones;
+    for (const c of z.hand) if (c.pub) { c.rev = true; delete c.pub; }
+    for (const c of [...z.main, ...z.runeDeck]) { c.rev = false; delete c.pub; }
+  }
+}
 function mightyWatch(s) {
   const was = s.mighty || (s.mighty = {});
   for (const p of SEATS) {
@@ -891,6 +904,10 @@ function applyTarget(s, e, iid, p) {
     if (e.readyMark) o.c.ex = false;
     if (e.detach) { const g0 = gearOn(s, o.c).find(x => /\[Equip\]/.test(cd(s, x).text || '')); if (g0) { g0.att = null; log(s, `${name(s, g0)} est détaché.`); } }
     const n = hp(s, o.c) + bonusDmg(s, p); hurt(s, c, n); log(s, `${name(s, o.c)} inflige ${n} à ${N}${src}.`);
+  }
+  else if (e.op === 'hand' && e.banishMax != null && hp(s, c) <= e.banishMax) { // Wind and Ghosts: small units are banished
+    f.arr.splice(f.i, 1); detach(s, c); Object.assign(c, { ex: false, dmg: 0, buff: 0, tb: 0, st: false, emp: false }); if (!isToken(s, c)) s.players[c.owner].zones.banish.unshift(c);
+    log(s, `${N} est banni${src}.`); syncCtrl(s); return;
   }
   else if (e.op === 'lockup') { // Dockside Lock-Up: the unit is banished, kept with this
     f.arr.splice(f.i, 1); detach(s, c); Object.assign(c, { ex: false, dmg: 0, buff: 0, tb: 0, st: false }); if (!isToken(s, c)) s.players[c.owner].zones.banish.unshift(c);
@@ -1409,7 +1426,7 @@ function apply(s, a) {
   snapshot(s, who);
   const err = act(s, a, who);
   if (err) s.history.pop();
-  else { mightyWatch(s); s.rev++; }
+  else { mightyWatch(s); revealWatch(s); s.rev++; }
   return err;
 }
 
@@ -1741,7 +1758,7 @@ function act(s, a, who) {
         };
         recycle(c); // "recycle the rest" before the chosen card resolves (its own effects may draw)
         if (!c) log(s, `${W2} ne prend aucune carte (${q.card}).`);
-        else if (e.then === 'hand') { const arr = e.from === 'top' ? z.main : e.from === 'hand' ? z.hand : e.from === 'banish' ? z.banish : z.trash; /* z.main was rebuilt by recycle() */ arr.splice(arr.indexOf(c), 1); z.hand.push(c); log(s, `${W2} prend ${name(s, c)} en main (${q.card}).`); }
+        else if (e.then === 'hand') { const arr = e.from === 'top' ? z.main : e.from === 'hand' ? z.hand : e.from === 'banish' ? z.banish : z.trash; /* z.main was rebuilt by recycle() */ arr.splice(arr.indexOf(c), 1); z.hand.push(c); if (/reveal/i.test((Object.values(s.cd).find(x => x.name === q.card) || {}).text || '')) c.rev = true; log(s, `${W2} prend ${name(s, c)} en main (${q.card}).`); }
         else {
           const ctl = e.toCtrlBf ? s.bfs.findIndex(b => b.ctrl === q.to) : -1;
           const err = playCard(s, q.to, { type: 'play', iid: c.iid, ...(ctl >= 0 && cd(s, c).type === 'Unit' ? { to: { bf: ctl } } : {}) }, { fx: true, free: !['playPaid', 'playDisc'].includes(e.then), discE: e.then === 'playDisc' ? e.disc : 0, powerOnly: !!e.payPower, recycle: !!e.recycle, how: ` grâce à ${q.card}` });
@@ -1956,7 +1973,6 @@ function act(s, a, who) {
       while (s.showdown) closeShowdown(s);
       if (auto(s, s.active)) s.bfs.forEach((b, i) => { if (b.units.p1.some(c => cd(s, c).type === 'Unit') && b.units.p2.some(c => cd(s, c).type === 'Unit')) act(s, { type: 'fight', bf: i, att: s.active }, s.active); });
       for (const c of [...s.bfs.flatMap(b => [...b.units.p1, ...b.units.p2]), ...s.players.p1.zones.base, ...s.players.p2.zones.base]) { c.dmg = 0; c.tb = 0; c.ta = 0; c.ts = 0; c.tt = false; c.st = false; c.tg = false; }
-      for (const p of SEATS) for (const c of s.players[p].zones.hand) c.rev = false;
       s.bfs.forEach((b, i) => { if (b.ctrl === s.active) for (const g of gearAt(s, i, s.active).slice()) deployTrigger(s, g, 'endTurn', s.active, i); });
       for (const q of SEATS) for (const c of s.players[q].zones.banish) if (c.anvil === s.active) delete c.anvil;
       const mf = s.minefield; if (mf && mf.turn === s.turn && mf.n && s.bfs.length) { const at = s.bfs.map((b, i) => i).sort((x, y) => s.bfs[y].units[other(mf.p)].length - s.bfs[x].units[other(mf.p)].length)[0]; makeTokens(s, mf.p, { name: 'Bomb', n: mf.n }, at, 'Hexplosive Minefield'); } delete s.minefield;

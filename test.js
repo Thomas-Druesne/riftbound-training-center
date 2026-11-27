@@ -906,7 +906,7 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     assert.ok(s.log.some(l => /regarde la carte du dessus/.test(l.msg)), 'Vision granted: look at the top card');
   }
   { // signature spells: Void Rush, Curtain Call (choose one), Counter Strike, Noxian Guillotine, Public Execution, Last Breath
-    const sig = n => { const G2 = legendGame('Annie, Dark Child'); s2 = G2; G2.s.cd[by(n).id] = by(n); for (const r of all.filter(c => / Rune$/.test(c.name) && c.type === 'Rune').slice(0, 6)) { G2.s.cd[r.id] = r; for (let i = 0; i < 2; i++) G2.Z.runes.push({ iid: 'x' + r.id + i, cid: r.id, owner: G2.P, ex: false }); } G2.Z.hand.push({ iid: 'sg', cid: by(n).id, owner: G2.P, ex: false }); return G2; };
+    const sig = n => { const G2 = legendGame('Annie, Dark Child'); s2 = G2; G2.s.cd[by(n).id] = by(n); for (const r of [...new Map(all.filter(c => / Rune$/.test(c.name) && c.type === 'Rune').map(r => [r.name, r])).values()]) { G2.s.cd[r.id] = r; for (let i = 0; i < 2; i++) G2.Z.runes.push({ iid: 'x' + r.id + i, cid: r.id, owner: G2.P, ex: false }); } G2.Z.hand.push({ iid: 'sg', cid: by(n).id, owner: G2.P, ex: false }); return G2; };
     let s2;
     const cast = (G2, targets) => { assert.equal(g.apply(G2.s, { type: 'play', seat: G2.P, iid: 'sg', targets }), null); g.apply(G2.s, { type: 'chainPass', seat: G2.O }); g.apply(G2.s, { type: 'chainResolve', seat: G2.P }); };
     // Void Rush: the top 2 are revealed, one is played for 2 Energy less, the other is drawn
@@ -940,6 +940,19 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     // Last Breath: ready my unit, it deals its Might to an enemy at a battlefield
     G2 = sig('Last Breath, Yasuo'); const lb = G2.unit('lb'); lb.ex = true; lb.tb = 20; G2.unit('lv', 0, G2.O); cast(G2, ['lb', 'lv']);
     assert.ok(!lb.ex && g.find(G2.s, 'lv').zone === 'trash', 'Last Breath: readied, enemy killed');
+    // Wind and Ghosts: 3 Might or less is banished, bigger goes back to hand and stays revealed
+    G2 = sig('Wind and Ghosts'); const wg = G2.unit('wg', 0, G2.O); wg.tb = 4 - g.hp(G2.s, wg); cast(G2, ['wg']);
+    assert.equal(g.find(G2.s, 'wg').zone, 'hand', 'Wind and Ghosts: 4 Might returns to hand');
+    assert.ok(g.find(G2.s, 'wg').c.rev, 'the returned card stays revealed');
+    assert.ok(!g.viewFor(G2.s, G2.P).players[G2.O].zones.hand.find(c => c.iid === 'wg').hidden, 'the opponent sees it');
+    G2 = sig('Wind and Ghosts'); const ws = G2.unit('ws', 0, G2.O); ws.tb = 3 - g.hp(G2.s, ws); cast(G2, ['ws']);
+    assert.equal(g.find(G2.s, 'ws').zone, 'banish', 'Wind and Ghosts: 3 Might is banished');
+    // Irresistible Faefolk: pulls an enemy when it moves to a battlefield, not when it goes back to base
+    G2 = sig('Irresistible Faefolk'); const ff = G2.unit('ff', 0); G2.s.cd[by('Irresistible Faefolk').id] = by('Irresistible Faefolk'); ff.cid = by('Irresistible Faefolk').id; G2.unit('fe', 1, G2.O);
+    assert.equal(g.apply(G2.s, { type: 'move', seat: G2.P, iid: 'ff', to: { zone: 'base', p: G2.P }, free: true }), null);
+    assert.ok(!G2.s.pending && !(G2.s.fxQueue || []).length, 'Faefolk: nothing when leaving');
+    assert.equal(g.apply(G2.s, { type: 'move', seat: G2.P, iid: 'ff', to: { bf: 0, side: G2.P }, free: true }), null);
+    assert.equal(G2.s.pending && G2.s.pending.card, 'Irresistible Faefolk', 'Faefolk: asks when arriving');
   }
   { // Orianna: start of the Main Phase, pay 1 to animate a gear
     const { s, P, O, Z } = legendGame('Orianna, Lady of Clockwork');
