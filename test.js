@@ -810,6 +810,8 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
   }
   { // Fiora: a unit becoming Mighty asks to channel; Jhin: 4 banished spells
     const { s, P, Z, unit } = legendGame('Fiora, Grand Duelist'); const u = unit('fi');
+    u.tb = -20; // nobody Mighty before
+    for (const x of [...s.players.p1.zones.base, ...s.players.p2.zones.base, ...s.bfs.flatMap(b => [...b.units.p1, ...b.units.p2])]) if (x !== u) x.tb = -20;
     const r0 = Z.runes[0].iid; g.apply(s, { type: 'exhaust', seat: P, iid: r0, value: false }); // first watch
     u.tb = 10; g.apply(s, { type: 'exhaust', seat: P, iid: r0, value: false });
     assert.equal(s.pending && s.pending.card, 'Fiora, Grand Duelist', 'Fiora asks when a unit becomes Mighty');
@@ -902,6 +904,42 @@ if (fs.existsSync('./data/cards.json') && fs.existsSync('./data/decks.json')) {
     Z.runes.forEach(r => (r.ex = false));
     assert.equal(g.apply(s, { type: 'play', seat: P, iid: v.iid }), null);
     assert.ok(s.log.some(l => /regarde la carte du dessus/.test(l.msg)), 'Vision granted: look at the top card');
+  }
+  { // signature spells: Void Rush, Curtain Call (choose one), Counter Strike, Noxian Guillotine, Public Execution, Last Breath
+    const sig = n => { const G2 = legendGame('Annie, Dark Child'); s2 = G2; G2.s.cd[by(n).id] = by(n); for (const r of all.filter(c => / Rune$/.test(c.name) && c.type === 'Rune').slice(0, 6)) { G2.s.cd[r.id] = r; for (let i = 0; i < 2; i++) G2.Z.runes.push({ iid: 'x' + r.id + i, cid: r.id, owner: G2.P, ex: false }); } G2.Z.hand.push({ iid: 'sg', cid: by(n).id, owner: G2.P, ex: false }); return G2; };
+    let s2;
+    const cast = (G2, targets) => { assert.equal(g.apply(G2.s, { type: 'play', seat: G2.P, iid: 'sg', targets }), null); g.apply(G2.s, { type: 'chainPass', seat: G2.O }); g.apply(G2.s, { type: 'chainResolve', seat: G2.P }); };
+    // Void Rush: the top 2 are revealed, one is played for 2 Energy less, the other is drawn
+    let G2 = sig('Void Rush'); const cheap = G2.Z.main.filter(x => g.cd(G2.s, x).type === 'Unit' && (g.cd(G2.s, x).energy || 0) >= 2).slice(0, 2);
+    for (const x of cheap) { G2.Z.main.splice(G2.Z.main.indexOf(x), 1); G2.Z.main.unshift(x); }
+    const hand0 = G2.Z.hand.length; cast(G2);
+    assert.equal(G2.s.pending && G2.s.pending.kind, 'pick', 'Void Rush: choose among the top 2');
+    assert.equal(G2.s.pending.top.length, 2);
+    const played = G2.s.pending.cards[0], other2 = G2.s.pending.top.find(id => id !== played);
+    assert.equal(g.apply(G2.s, { type: 'resolve', seat: G2.P, iids: [played] }), null);
+    assert.ok(['base', 'bf'].includes(g.find(G2.s, played).zone), 'one is played');
+    assert.equal(g.find(G2.s, other2).zone, 'hand', 'the other is drawn');
+    assert.equal(G2.Z.hand.length, hand0, 'hand: -Void Rush +the other card');
+    // Curtain Call: choose one
+    G2 = sig('Curtain Call'); const h1 = G2.Z.hand.length; cast(G2);
+    assert.equal(G2.s.pending && G2.s.pending.kind, 'mode', 'Curtain Call asks which effect');
+    assert.equal(g.apply(G2.s, { type: 'resolve', seat: G2.P, modes: [0] }), null);
+    assert.equal(G2.Z.hand.length, h1, 'drew 1 (the spell left the hand)');
+    // Counter Strike: the next damage is prevented, then draw 1
+    G2 = sig('Counter Strike'); const cs = G2.unit('cs'); cast(G2, ['cs']);
+    g.apply(G2.s, { type: 'damage', seat: G2.P, iid: 'cs', n: 1 });
+    assert.equal(cs.dmg || 0, 0, 'Counter Strike: damage prevented');
+    // Noxian Guillotine: kill it the next time it takes damage this turn
+    G2 = sig('Noxian Guillotine, Darius'); const ng = G2.unit('ng', 0, G2.O); cast(G2, ['ng']);
+    assert.ok(g.find(G2.s, 'ng').zone !== 'trash', 'not killed yet (no Legion)');
+    g.apply(G2.s, { type: 'damage', seat: G2.P, iid: 'ng', n: 1 });
+    assert.equal(g.find(G2.s, 'ng').zone, 'trash', 'killed on the next damage');
+    // Public Execution: kill an enemy with less Might than my unit
+    G2 = sig('Public Execution'); const big = G2.unit('pe'); big.tb = 20; const small = G2.unit('pv', 0, G2.O); cast(G2, ['pe', 'pv']);
+    assert.equal(g.find(G2.s, 'pv').zone, 'trash', 'Public Execution kills the smaller enemy');
+    // Last Breath: ready my unit, it deals its Might to an enemy at a battlefield
+    G2 = sig('Last Breath, Yasuo'); const lb = G2.unit('lb'); lb.ex = true; lb.tb = 20; G2.unit('lv', 0, G2.O); cast(G2, ['lb', 'lv']);
+    assert.ok(!lb.ex && g.find(G2.s, 'lv').zone === 'trash', 'Last Breath: readied, enemy killed');
   }
   { // Orianna: start of the Main Phase, pay 1 to animate a gear
     const { s, P, O, Z } = legendGame('Orianna, Lady of Clockwork');

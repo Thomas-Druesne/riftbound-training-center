@@ -21,6 +21,7 @@ function human(v, me) {
     if (q.kind === 'bf') return { type: 'resolve', bf: q.opts[0] };
     if (q.kind === 'predict') return { type: 'resolve', iids: [] };
     if (q.kind === 'pick') return { type: 'resolve', iids: q.cards.slice(0, 1) };
+    if (q.kind === 'mode') return { type: 'resolve', modes: q.opts.slice(0, q.n).map(o => o.i) };
     if (q.kind === 'confirm') return { type: 'resolve', yes: true };
     if (q.kind === 'target') return { type: 'resolve', iids: q.opt ? [] : [q.opts[0]] };
     if (q.kind === 'discard') return { type: 'resolve', iids: z.hand.slice(0, q.n).map(c => c.iid) };

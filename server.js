@@ -191,7 +191,7 @@ function aiFallback(r) {
   const s = r.state, me = r.ai.seat;
   {
     const top = s.chain && s.chain[s.chain.length - 1];
-    if (s.pending) return s.pending.to === me ? (s.pending.kind === 'confirm' ? { type: 'resolve', yes: false } : s.pending.kind === 'bf' ? { type: 'resolve', bf: s.pending.opts[0] } : { type: 'resolve', iids: s.pending.opt ? [] : s.pending.kind === 'discard' ? s.players[me].zones.hand.slice(0, s.pending.n).map(c => c.iid) : ['sacrifice', 'buff'].includes(s.pending.kind) ? [...s.players[me].zones.base, ...s.bfs.flatMap(b => b.units[me])].filter(c => game.cd(s, c).type === 'Unit' && c.iid !== s.pending.exclude).slice(0, 1).map(c => c.iid) : (s.pending.opts || []).slice(0, s.pending.n) }) : null;
+    if (s.pending) return s.pending.to === me ? (s.pending.kind === 'confirm' ? { type: 'resolve', yes: false } : s.pending.kind === 'mode' ? { type: 'resolve', modes: s.pending.opts.slice(0, s.pending.n).map(o => o.i) } : s.pending.kind === 'bf' ? { type: 'resolve', bf: s.pending.opts[0] } : { type: 'resolve', iids: s.pending.opt ? [] : s.pending.kind === 'discard' ? s.players[me].zones.hand.slice(0, s.pending.n).map(c => c.iid) : ['sacrifice', 'buff'].includes(s.pending.kind) ? [...s.players[me].zones.base, ...s.bfs.flatMap(b => b.units[me])].filter(c => game.cd(s, c).type === 'Unit' && c.iid !== s.pending.exclude).slice(0, 1).map(c => c.iid) : (s.pending.opts || []).slice(0, s.pending.n) }) : null;
     if (top) return top.cb.by !== me ? (top.cb.seen ? null : { type: 'chainPass' }) : top.cb.seen ? { type: 'chainResolve' } : null;
     if (s.showdown) return s.showdown.focus === me ? { type: 'pass' } : null;
     return s.active === me && s.stage === 'main' ? { type: 'endTurn' } : null;
@@ -344,6 +344,16 @@ http.createServer(async (req, res) => {
       const ping = setInterval(() => res.write(': ping\n\n'), 20000);
       req.on('close', () => { clearInterval(ping); r.clients.delete(c); r.seen = Date.now(); });
       return;
+    }
+    if (p === '/api/report' && req.method === 'POST') { // "Signaler un blocage": the exact state, to replay it
+      const a = await body(req), r = rooms.get(a.room);
+      if (!r) return json(res, 404, { error: 'Partie introuvable' });
+      const { history, ...state } = r.state;
+      const dirR = path.join(__dirname, 'reports'); if (!fs.existsSync(dirR)) fs.mkdirSync(dirR);
+      const file = new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+      fs.writeFileSync(path.join(dirR, file), JSON.stringify({ note: String(a.note || '').slice(0, 2000), seat: a.seat, ai: r.ai && { seat: r.ai.seat, level: r.ai.level }, match: r.match, decks: Object.fromEntries(Object.entries(r.decks || {}).map(([k, d]) => [k, d && d.name])), state }, null, 1));
+      console.log('Rapport de blocage enregistré : reports/' + file);
+      return json(res, 200, { file: 'reports/' + file });
     }
     if (p === '/api/action' && req.method === 'POST') {
       const a = await body(req);

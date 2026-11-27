@@ -44,6 +44,25 @@ node e2e.js [parties=6] [niveau=normal]
 Parties complètes à travers le vrai serveur (HTTP, SSE et tours de l'IA avec leurs pauses, accélérées), comme le
 navigateur. Échoue si la partie s'arrête de bouger. À lancer après toute modification de `server.js` ou de `ai.js`.
 
+```
+node sweep.js [filtre sur le nom de la carte]
+```
+
+Balayage carte par carte : chaque carte jouable est mise en main (ressources et plateau prêts), jouée en mode auto,
+et chaque choix reçoit la première réponse que l'interface permet. Les sorts [Action] / [Reaction] sont aussi lancés
+pendant un affrontement. Rapport dans `sweep-report.md` : plantages, choix impossibles, pile bloquée, carte en double,
+texte non compris par le moteur.
+
+```
+node replay.js reports/<fichier>.json
+```
+
+Rejoue un rapport « Signaler un blocage » (menu ⚙ pendant une partie : l'état exact est enregistré dans `reports/`).
+Affiche ce que la partie attend et ce que chaque joueur peut faire.
+
+`stress.js` accepte aussi `AUTO=1` (les deux sièges en mode auto), `DUP=1` (échoue si une carte est à deux endroits)
+et `LEG=1` (compte les capacités de légendes).
+
 `node seed-legend-decks.js` ajoute un deck de test légal pour chaque légende qui n'en a pas (`data/decks.json`).
 
 `node import-decklists.js` reconstruit les decks : un par légende, nommé d'après la légende, au format tournoi (1 légende, 1 champion choisi, 39 cartes, 10 cartes de sideboard, 3 champs de bataille, 12 runes). Sources : les listes compétitives de `data/decklists/` ; une liste sans carte bannie est préférée, sinon les cartes bannies sont remplacées par des copies des cartes du deck principal (jamais par le sideboard).

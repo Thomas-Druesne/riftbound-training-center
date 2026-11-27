@@ -139,6 +139,7 @@ list.forEach((d1, i) => {
     for (const [k2, n] of Object.entries(r.refused)) out.refused[k2] = (out.refused[k2] || 0) + n;
     out.wins[r.winner ? (r.winner === hs ? 'humain' : 'IA') : 'aucun']++;
     out.turns += r.turn;
+    if (process.env.LOGALL) for (const { msg } of r.s.log) { const m = /✦ .+? (?:joue|lance) (.+?)(?: \(| grâce à| depuis|\.$|\. |,)/.exec(msg); if (m) console.log("PLAY " + m[1]); }
     for (const { msg } of r.s.log) { for (const [k2, re] of FX) if (re.test(msg)) out.fx[k2] = (out.fx[k2] || 0) + 1; const m = /↳ (.+?) \(légende\) : capacité|⚡ .+? active (.+?) :/.exec(msg); if (m) { const k3 = m[1] ? m[1] + " (passif)" : m[2]; out.leg[k3] = (out.leg[k3] || 0) + 1; } }
   }
 });

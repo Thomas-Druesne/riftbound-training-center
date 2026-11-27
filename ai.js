@@ -17,7 +17,7 @@ const clone = m => structuredClone(m);
 
 /* ---------------- board model for simulation ---------------- */
 function unitOf(s, c, side) {
-  const d = G.cd(s, c), k = R.kw(d.text);
+  const k = G.kwOf(s, c);
   return { iid: c.iid, side, m: G.hp(s, c), as: k.assault + (c.ta || 0), sh: k.shield + (c.ts || 0), tank: k.tank || !!c.tt, backline: k.backline, ready: !c.ex, stun: !!c.st, dmg: c.dmg || 0 };
 }
 const isUnit = (s, c) => G.cd(s, c).type === 'Unit';
@@ -44,7 +44,45 @@ const hpA = u => Math.max(0, u.m + u.as), hpD = u => Math.max(0, u.m + u.sh);
 const allUnits = (m, p) => [...m.base[p], ...m.bfs.flatMap(b => b.u[p])];
 const mightOf = (m, p) => allUnits(m, p).reduce((t, u) => t + u.m, 0);
 
+// combat tricks I can cast in a showdown this turn (Action / Reaction spells I can pay now), as model effects
+function trickList(s, me) {
+  const z = s.players[me].zones, runes = G.runesOf(s, me), pool = s.players[me].pool, out = [];
+  for (const c of z.hand) {
+    const d = G.cd(s, c), k = R.kw(d.text);
+    if (d.type !== 'Spell' || !(k.action || k.reaction) || !R.planCost(runes, pool, R.cardCost(d))) continue;
+    const t = R.playFx(d).find(e => e.kind === 'target'); if (!t) continue;
+    const cost = (d.energy || 0) + (d.power || 0);
+    if (t.op === 'double' || ((t.op === 'might' || t.op === 'assault') && typeof t.n === 'number' && t.n > 0 && t.side !== 'enemy')) out.push({ k: 'buff', n: t.op === 'double' ? 'x2' : t.n, cost });
+    else if (t.op === 'might' && typeof t.n === 'number' && t.n < 0) out.push({ k: 'shrink', n: -t.n, cost });
+    else if (t.side !== 'friendly' && ['dmg', 'kill', 'stun'].includes(t.op)) out.push({ k: t.op, n: typeof t.n === 'number' ? t.n : 0, max: t.max, cost });
+  }
+  return out;
+}
+function applyTrick(b, att, def, tr) {
+  const mine = b.u[att].filter(u => !u.stun).sort((x, y) => hpA(y) - hpA(x)), foes = b.u[def].slice().sort((x, y) => hpD(y) - hpD(x));
+  if (tr.k === 'buff') { const u = mine[0]; if (!u) return false; if (tr.n === 'x2') u.m *= 2; else u.as += tr.n; return true; }
+  if (tr.k === 'shrink') { const u = foes[0]; if (!u) return false; u.m = Math.max(0, u.m - tr.n); return true; }
+  if (tr.k === 'stun') { const u = foes.find(x => !x.stun); if (!u) return false; u.stun = true; return true; }
+  const u = foes.find(x => (tr.k === 'kill' ? tr.max == null || x.m <= tr.max : Math.max(1, x.m) - x.dmg <= tr.n)); if (!u) return false;
+  b.u[def].splice(b.u[def].indexOf(u), 1); return true;
+}
 function simFight(m, i, att) {
+  if (m.tricks && m.tricks.length && att === m.me && !m.trickUsed) { // try my best trick in this fight
+    const plain = clone(m); plain.tricks = null; simFightRaw(plain, i, att);
+    let best = null;
+    for (const tr of m.tricks) {
+      const t = clone(m); t.tricks = null;
+      if (!applyTrick(t.bfs[i], att, other(att), tr)) continue;
+      simFightRaw(t, i, att);
+      const won = t.bfs[i].ctrl === att && plain.bfs[i].ctrl !== att, kept = t.bfs[i].u[att].length + t.base[att].length - plain.bfs[i].u[att].length - plain.base[att].length;
+      const v = (won ? 10 : 0) + kept * 2 - tr.cost * 0.3;
+      if (v > 0.5 && (!best || v > best.v)) best = { v, tr };
+    }
+    if (best) { m.trickUsed = true; applyTrick(m.bfs[i], att, other(att), best.tr); }
+  }
+  return simFightRaw(m, i, att);
+}
+function simFightRaw(m, i, att) {
   const b = m.bfs[i], def = other(att);
   const { deadA, deadD } = R.combat(b.u[att], b.u[def], hpA, hpD);
   b.u[att] = b.u[att].filter(u => !deadA.includes(u));
@@ -281,7 +319,7 @@ function phaseAttack(s, me, level) {
   if (level === 'easy') {
     moves = m.base[me].filter(u => u.ready && u.m > 0 && Math.random() < 0.45).map(u => ({ iid: u.iid, to: rnd(m.bfs.length) }));
   } else if (PLAN.noAttack) moves = [];
-  else { m.pro = level === 'pro'; m.aggro = !!PLAN.aggro; moves = level === 'pro' && !SIM ? proAttack(s, me, m) : searchAttack(m, me); }
+  else { m.pro = level === 'pro'; m.aggro = !!PLAN.aggro; if (hardish(level) && !SIM) m.tricks = trickList(s, me); moves = level === 'pro' && !SIM ? proAttack(s, me, m) : searchAttack(m, me); }
   return movesToActs(s, me, moves);
 }
 function movesToActs(s, me, moves) {
@@ -341,6 +379,8 @@ function kindValue(s, me, e) {
   const op = other(me), mine = e.who !== 'opp', P = mine ? me : op, sg = mine ? 1 : -1;
   const z = s.players[P].zones;
   switch (e.kind) {
+    case 'mode': return sg * 1.8 * (e.n || 1);
+    case 'readyAny': return sg * 0.6 * e.n;
     case 'draw': return sg * 1.5 * (e.n + (e.per === 'bfCtrl' ? s.bfs.filter(b => b.ctrl === P).length : e.per === 'mighty' ? unitsAll(s, P).filter(c => G.hp(s, c) >= 5).length : 0));
     case 'discard': return -sg * Math.min(e.n, z.hand.length) * 1.1;
     case 'reveal': return 0.3;
@@ -467,7 +507,7 @@ function phaseMain(s, me, level) {
   }
   if (!cands.length) return [];
   // a reaction worth holding (counter or combat trick) when the opponent has units or cards in hand
-  const quick = z.hand.map(c => G.cd(s, c)).filter(d => d.type === 'Spell' && R.kw(d.text).reaction && R.playFx(d).length);
+  const quick = z.hand.map(c => G.cd(s, c)).filter(d => d.type === 'Spell' && R.playFx(d).length && (R.kw(d.text).reaction || (hardish(level) && R.kw(d.text).action && R.playFx(d).some(e => e.kind === 'target' && COMBAT_OPS.includes(e.op)))));
   const reserve = (unitsAll(s, op).length || s.players[op].zones.hand.length) && quick.length ? quick.sort((a, b) => (a.energy || 0) - (b.energy || 0))[0] : null;
   const list = cands.sort((a, b) => b.v - a.v).slice(0, 10);
   const best = keep => {
@@ -515,7 +555,13 @@ function pregame(s, me, level) {
 // Answer a prompt aimed at the AI: discard the least useful cards / lose the weakest unit.
 function answer(s, me, level) {
   const q = s.pending;
-  if (q.kind === 'confirm') return { type: 'resolve', yes: q.ai !== false }; // battlefield "you may": take it
+  if (q.kind === 'confirm') return { type: 'resolve', yes: q.ai !== false };
+  if (q.kind === 'mode') { // value each option: a kill > a card > a body > a buff
+    const val = o => q.fx.opts[o.i].fx.reduce((t, e) => t + (e.kind === 'draw' ? 1.5 * e.n : e.kind === 'token' ? 0.8 * e.n : e.kind === 'pick' ? 1.3
+      : e.kind === 'target' && e.op === 'dmg' ? (G.candidates(s, me, { ...e, src: q.fx.src }).some(id => { const f = G.find(s, id); return f && f.p !== me && G.lethal(s, f.c) - (f.c.dmg || 0) <= e.n; }) ? 4 : 0.6)
+      : e.kind === 'target' && e.op === 'might' ? (e.n < 0 ? (s.showdown ? 2.5 : 1) : s.showdown ? 1.5 : 0.4) : 0.5), 0);
+    return { type: 'resolve', modes: q.opts.map(o => ({ i: o.i, v: val(o) })).sort((a, b) => b.v - a.v).slice(0, q.n).map(o => o.i) };
+  } // battlefield "you may": take it
   if (q.kind === 'pick') {
     const z = s.players[me].zones, cs = q.cards.map(id => [...z.trash, ...z.main].find(c => c.iid === id)).filter(Boolean);
     const cost = c => (G.cd(s, c).energy || 0) + (G.cd(s, c).power || 0);

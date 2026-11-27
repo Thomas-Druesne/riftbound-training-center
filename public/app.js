@@ -51,11 +51,11 @@ const sfx = (() => {
     if (!ctx) {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
       master = ctx.createGain(); master.gain.value = 0.55;
-      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5500;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6200;
       master.connect(lp); lp.connect(ctx.destination);
       // short airy echo so the chimes feel "magical" rather than beepy
       const dl = ctx.createDelay(), fb = ctx.createGain(), wet = ctx.createGain();
-      dl.delayTime.value = 0.13; fb.gain.value = 0.28; wet.gain.value = 0.2;
+      dl.delayTime.value = 0.17; fb.gain.value = 0.24; wet.gain.value = 0.22;
       master.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(wet); wet.connect(lp);
     }
     if (ctx.state === 'suspended') ctx.resume();
@@ -77,11 +77,11 @@ const sfx = (() => {
   };
   const play = (fn, kind = 'anim') => { if (muted || !(vol[kind] > 0.001)) return; try { init(); k = vol[kind]; fn(ctx.currentTime); } catch {} };
   return {
-    hover: () => { const n = performance.now(); if (n - lastHover < 60) return; lastHover = n; play(t => tone(2600, t, 0.045, 0.01), 'hover'); },
-    click: () => play(t => { tone(1318.5, t, 0.25, 0.04); tone(1975.5, t + 0.035, 0.32, 0.022); noise(t, 0.04, 0.015, 3500); }),
-    card: () => play(t => { noise(t, 0.11, 0.03, 850); tone(190, t, 0.12, 0.035, 'sine', 95); }),
-    turn: () => play(t => [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => tone(f, t + i * 0.07, 0.8, 0.026, 'triangle'))),
-    score: () => play(t => [783.99, 1046.5, 1318.5].forEach((f, i) => tone(f, t + i * 0.08, 0.5, 0.035))),
+    hover: () => { const n = performance.now(); if (n - lastHover < 60) return; lastHover = n; play(t => tone(2349.3, t, 0.05, 0.01, 'triangle'), 'hover'); },
+    click: () => play(t => { tone(1174.7, t, 0.24, 0.04); tone(1760, t + 0.03, 0.3, 0.02); noise(t, 0.035, 0.013, 3000); }),
+    card: () => play(t => { noise(t, 0.12, 0.03, 720); tone(210, t, 0.13, 0.034, 'sine', 100); }),
+    turn: () => play(t => [587.33, 739.99, 880, 1318.5].forEach((f, i) => tone(f, t + i * 0.065, 0.85, 0.025, 'triangle'))),
+    score: () => play(t => [880, 1174.66, 1479.98].forEach((f, i) => tone(f, t + i * 0.075, 0.55, 0.034))),
     // Baron Nashor: a deep rumble, a roar sweeping down, then a dark chord
     baron: () => play(t => {
       tone(55, t, 2.4, 0.09, 'sawtooth', 32); tone(82.4, t + 0.05, 2.2, 0.05, 'triangle', 41);
@@ -89,7 +89,7 @@ const sfx = (() => {
       tone(392, t + 1.05, 0.6, 0.03, 'sawtooth', 98);
       [110, 130.8, 164.8, 220].forEach((f, i) => tone(f, t + 1.15 + i * 0.05, 2.2, 0.035, 'triangle'));
     }),
-    start: () => play(t => { tone(196, t, 1.4, 0.045, 'triangle', 392); tone(293.7, t + 0.06, 1.4, 0.03, 'sine', 587.3); noise(t, 0.7, 0.015, 1400); }),
+    start: () => play(t => { tone(220, t, 1.4, 0.045, 'triangle', 440); tone(329.6, t + 0.06, 1.4, 0.03, 'sine', 659.3); noise(t, 0.7, 0.015, 1600); }),
     toggle() { muted = !muted; store.set('mute', muted); return muted; },
     setVol(kind, v) { vol[kind] = v; store.set(kind === 'hover' ? 'volHover' : 'volAnim', v); },
     vol,
@@ -124,6 +124,11 @@ function openOptions() {
     h('div', { class: 'opt-row' }, h('div', {}, h('span', {}, T('Langue')), h('small', {}, T('La page se recharge pour changer de langue.'))), h('div', { class: 'opt-lang' }, langBtn('fr', 'Français'), langBtn('en', 'English'))),
     slider('Volume des animations', 'Sons des cartes, des tours, des points et des clics.', 'anim'),
     slider('Volume du survol', 'Petit son au passage de la souris sur les boutons.', 'hover'),
+    S.room && S.v && S.v.phase === 'playing' ? h('div', { class: 'opt-row' }, h('div', {}, h('span', {}, T('Signaler un blocage')), h('small', {}, T('Enregistre l’état exact de la partie pour que le problème puisse être rejoué et corrigé.'))),
+      h('button', { class: 'btn', onclick: async () => {
+        const note = prompt(T('Que se passe-t-il ? (facultatif)')) || '';
+        try { const r = await api('/api/report', { body: { room: S.room, seat: S.seat, note } }); closeModal(); toast(T('Rapport enregistré : ') + r.file); } catch (e) { toast(e.message); }
+      } }, '⚑ ' + T('Signaler'))) : null,
     h('label', { class: 'opt-mute' }, h('input', { type: 'checkbox', checked: sfx.muted, onchange: () => { const m = sfx.toggle(); $$('.mute:not(.opt)').forEach(x => (x.innerHTML = SPEAKER(m))); } }), T('Couper tous les sons')),
     h('div', { class: 'row' }, h('button', { class: 'btn gold', onclick: closeModal }, T('Fermer')))));
 }
@@ -1047,6 +1052,24 @@ function renderPregame() {
 S.pick = new Set();
 function renderPrompt(P, v) {
   const q = v.pending, me = S.me, fx = q.fx || {};
+  if (q.kind === 'mode') { // "Choose one / two"
+    const key = 'prompt|mode|' + q.card + q.opts.map(o => o.i).join();
+    if (P.dataset.key === key && P.classList.contains('show')) return;
+    P.dataset.key = key; P.innerHTML = '';
+    const sel = new Set(), d = Object.values(S.byId).find(x => x.name === q.card);
+    const ok = h('button', { class: 'btn gold big', disabled: true, onclick: () => send({ type: 'resolve', modes: [...sel] }) }, T('Valider'));
+    P.append(h('div', { class: 'pg' },
+      h('div', { class: 'pg-step' }, q.card), h('h2', {}, T(q.n > 1 ? 'Choisissez deux effets' : 'Choisissez un effet')),
+      d ? h('div', { class: 'pg-cards' }, cardView(d)) : null,
+      h('div', { class: 'modes' }, q.opts.map(o => h('button', { class: 'btn mode-opt', onclick: ev => {
+        if (sel.has(o.i)) sel.delete(o.i); else { if (sel.size >= q.n) sel.delete([...sel][0]); sel.add(o.i); }
+        P.querySelectorAll('.mode-opt').forEach((b, k) => b.classList.toggle('on', sel.has(q.opts[k].i)));
+        ok.disabled = sel.size !== q.n;
+      } }, T(o.label)))),
+      h('div', { class: 'pg-actions' }, ok)));
+    P.classList.add('show');
+    return;
+  }
   if (q.kind === 'confirm') { // a battlefield's "you may": yes / no
     const key = 'prompt|confirm|' + q.card + q.text;
     if (P.dataset.key === key && P.classList.contains('show')) return;
@@ -1457,6 +1480,7 @@ function cardMenu(e, iid) {
       ? ['✦ Jouer sans le coût additionnel', () => send({ type: 'play', iid, extra: false })]
       : ['✦ Jouer avec le coût additionnel (payé à la main)', () => send({ type: 'play', iid, extra: true })]) : null,
     inHand && /\[Repeat\]/.test(txt) ? [`✦ Jouer avec Repeat (payez ${costLabel(txt, 'Repeat')} en plus)`, () => send({ type: 'play', iid, repeat: true })] : null,
+    L.zone === 'trash' && mine && c.dfb ? ['✦ Rejouer depuis la défausse (1 puissance)', () => { closeModal(); send({ type: 'play', iid }); }] : null,
     L.zone === 'trash' && mine && /\[Flow\]/.test(txt) ? [`✦ Jouer depuis la défausse (Flow : ${costLabel(txt, 'Flow')})`, () => { closeModal(); send({ type: 'play', iid, flow: true }); }] : null,
     onBoard && mine && d && d.type === 'Gear' && /\[Equip\]/.test(txt) ? (c.att ? ['Détacher l’équipement', () => send({ type: 'unequip', iid })]
       : { sub: `Équiper (${costLabel(txt, 'Equip')})`, items: myUnits.length ? myUnits.map(u => [(cardOf(u) || {}).name || 'unité', () => send({ type: 'equip', iid, unit: u.iid })]) : [['Aucune unité', () => {}]] }) : null,

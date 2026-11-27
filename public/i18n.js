@@ -84,7 +84,12 @@ const EN = {
   'Cliquez sur l’unité alliée qui reçoit le buff (+1 force si elle n’en a pas déjà un).': 'Click the friendly unit that gets the buff (+1 Might if it has none yet).',
   'Cliquez sur la cible. Les unités ennemies sont marquées en rouge.': 'Click the target. Enemy units are marked in red.', 'Cliquez sur le champ de bataille visé.': 'Click the battlefield.',
   'Le dessus de votre deck. Cliquez sur les cartes à recycler sous le deck, les autres restent dessus.': 'The top of your deck. Click the cards to recycle to the bottom; the others stay on top.',
-  'Non jouable (coût ou type)': 'Not playable (cost or type)', 'retirer Empowered': 'disempower', 'Ne rien prendre': 'Take nothing', 'ATTAQUANT': 'ATTACKER', 'Le Puits du Baron surgit au centre du champ de bataille': 'The Baron Pit rises in the middle of the battlefield', 'DÉFENSEUR': 'DEFENDER', 'Tout garder': 'Keep all', 'Valider': 'Confirm', 'Fermer': 'Close', 'Vide': 'Empty', 'Mélanger et fermer': 'Shuffle and close',
+  'Non jouable (coût ou type)': 'Not playable (cost or type)', 'retirer Empowered': 'disempower', 'Ne rien prendre': 'Take nothing', 'ATTAQUANT': 'ATTACKER', 'Signaler un blocage': 'Report a blocked game', 'Signaler': 'Report', 'Que se passe-t-il ? (facultatif)': 'What is happening? (optional)', 'Rapport enregistré : ': 'Report saved: ',
+  'Enregistre l’état exact de la partie pour que le problème puisse être rejoué et corrigé.': 'Saves the exact game state so the problem can be replayed and fixed.', 'Choisissez un effet': 'Choose one', 'Choisissez deux effets': 'Choose two', 'Piocher 1': 'Draw 1',
+  'Infliger 2 à une unité sur un champ de bataille': 'Deal 2 to a unit at a battlefield', 'Infliger 3 à une unité dans une base': 'Deal 3 to a unit at a base',
+  'Donner −4 force ce tour à une unité sur un champ de bataille': 'Give a unit at a battlefield -4 Might this turn', 'Infliger 2 à une unité': 'Deal 2 to a unit',
+  'Jouer deux jetons Recruit 1 force': 'Play two 1 Might Recruit tokens', "Jusqu'à deux unités +1 force ce tour": 'Up to two units get +1 Might this turn',
+  'Regarder les 2 cartes du dessus, en piocher 1': 'Look at the top 2 cards, draw 1', 'Le Puits du Baron surgit au centre du champ de bataille': 'The Baron Pit rises in the middle of the battlefield', 'DÉFENSEUR': 'DEFENDER', 'Tout garder': 'Keep all', 'Valider': 'Confirm', 'Fermer': 'Close', 'Vide': 'Empty', 'Mélanger et fermer': 'Shuffle and close',
   'Ordre : du dessus vers le dessous. Glissez une carte vers le plateau ou clic droit pour la déplacer.': 'Order: top to bottom. Drag a card to the board or right-click it to move it.',
   'Glissez une carte vers le plateau ou clic droit pour la déplacer.': 'Drag a card to the board or right-click it to move it.',
   // pre-game
